@@ -26,6 +26,11 @@ def hasReturnType (e : Expr) (p : Expr → Bool) : Bool :=
   | .forallE _ _ b _ => hasReturnType b p
   | _                => p e
 
+/-- We 100x the number of simp steps allowed. Without this, embedding fails with
+a '`simp` failed: maximum number of steps exceeded' error on some goals. It's
+not ideal. -/
+def embeddingSimpMaxSteps := 100 * Lean.Meta.Simp.defaultMaxSteps
+
 def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   withTraceNode (`smt.perf.preprocess ++ `embedding) (fun _ => return "embedding") do
   mv.withContext do
@@ -58,7 +63,7 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let (fvs, mv) ← mv.revert fvs true
   -- Simplify the goal using the embedding theorems.
   let congrTheorems ← Meta.getSimpCongrTheorems
-  let ctx ← Meta.Simp.mkContext { zeta := false } simpTheorems congrTheorems
+  let ctx ← Meta.Simp.mkContext { zeta := false, maxSteps := embeddingSimpMaxSteps } simpTheorems congrTheorems
   let (some mv, _) ← Meta.simpTarget mv ctx simpProcs (mayCloseGoal := false) | throwError "[embedding] simplification failed"
   -- Extend `fvs` to account for `nonneg` assumptions.
   let bts := bts.pop -- Do not consider `Bool` for assumptions.
