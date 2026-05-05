@@ -182,6 +182,23 @@ example {f : Nat → Int → Nat} : ∀ m : Int, m ≥ 0 → f m.toNat 0 = m →
 example {f : Nat → Int → Nat → Nat} : ∀ m : Int, m ≥ 0 → f m.toNat 5 0 = m → m ≥ 0 := by
   smt
 
+-- Fin embedding tests
+
+theorem nat_embedding (f : Nat → Nat → Bool) : f 0 0 = false := by
+  smt
+
+theorem fin_embedding (f : Fin 4 → Fin 4 → Bool) : f 0 0 = false := by
+  smt
+
+theorem fin_bound_free (x : Fin 4) : (x : Nat) < 4 := by
+  smt
+
+theorem fin_bound_output (g : Nat → Fin 4) (a : Nat) : ((g a : Fin 4) : Nat) < 4 := by
+  smt
+
+theorem fin_input_literal (f : Fin 4 → Fin 4 → Bool) : f 0 0 = f 0 0 := by
+  smt
+
 -- Rational number tests
 
 example (x y : Rat) : x + y = y + x := by

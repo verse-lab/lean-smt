@@ -6,7 +6,9 @@ Test/Unit/Embedding.lean:32:35: warning: unused variable `h2`
 Note: This linter can be disabled with `set_option linter.unusedVariables false`
 Try this:
   [apply] smt [h2, h4, h5]
-Test/Unit/Embedding.lean:309:2: error: [poly_norm] expected a rational number, got x.7407
+Test/Unit/Embedding.lean:188:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+Test/Unit/Embedding.lean:191:2: error: unable to prove goal, either it is false or you need to provide more facts. Try adding '+model' config option to display a potential counter-example (experimental).
+Test/Unit/Embedding.lean:326:2: error: [poly_norm] expected a rational number, got x.7407
 Map: []
 Map: []
 goal: ∃ x, (∃ a b, x = ↑a / ↑b) ∧ ((∃ a b, x = ↑a / ↑b) → x = 0)
@@ -15,7 +17,7 @@ query:
 (set-logic ALL)
 (assert (not (exists ((x Real)) (and (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (=> (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (= x 0.0))))))
 (check-sat)
-Test/Unit/Embedding.lean:317:30: error: unsolved goals
+Test/Unit/Embedding.lean:334:30: error: unsolved goals
 ⊢ ∃ x, (∃ a b, x = ↑a / ↑b) ∧ ((∃ a b, x = ↑a / ↑b) → x = 0)
 goal: ∃ n, f n ≥ n
 
@@ -25,7 +27,7 @@ query:
 (assert (forall ((x Real)) (=> (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (exists ((a Int)) (exists ((b Int)) (= (f x) (/ (to_real a) (to_real b))))))))
 (assert (not (exists ((x Real)) (and (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (=> (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (<= x (f x)))))))
 (check-sat)
-Test/Unit/Embedding.lean:333:42: error: unsolved goals
+Test/Unit/Embedding.lean:350:42: error: unsolved goals
 f : ℚ → ℚ
 ⊢ ∃ n, f n ≥ n
 goal: ∃ x n, f x n ≥ n
@@ -36,10 +38,10 @@ query:
 (assert (forall ((|a₁| Int)) (forall ((|a₂| Real)) (exists ((a Int)) (exists ((b Int)) (= (f |a₁| |a₂|) (/ (to_real a) (to_real b))))))))
 (assert (not (exists ((x Int)) (exists ((x_1 Real)) (and (exists ((a Int)) (exists ((b Int)) (= x_1 (/ (to_real a) (to_real b))))) (=> (exists ((a Int)) (exists ((b Int)) (= x_1 (/ (to_real a) (to_real b))))) (<= x_1 (f x x_1))))))))
 (check-sat)
-Test/Unit/Embedding.lean:336:52: error: unsolved goals
+Test/Unit/Embedding.lean:353:52: error: unsolved goals
 f : ℤ → ℚ → ℚ
 ⊢ ∃ x n, f x n ≥ n
-Test/Unit/Embedding.lean:343:2: error: Application type mismatch: The argument
+Test/Unit/Embedding.lean:360:2: error: Application type mismatch: The argument
   a
 has type
   ℤ
@@ -47,7 +49,7 @@ but is expected to have type
   ℝ
 in the application
   HDiv.hDiv a
-Test/Unit/Embedding.lean:349:2: error: Application type mismatch: The argument
+Test/Unit/Embedding.lean:366:2: error: Application type mismatch: The argument
   a
 has type
   ℤ
@@ -65,12 +67,12 @@ query:
 (assert (f x))
 (assert (not (exists ((x Real)) (and (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (=> (exists ((a Int)) (exists ((b Int)) (= x (/ (to_real a) (to_real b))))) (and (<= 0.0 x) (f x)))))))
 (check-sat)
-Test/Unit/Embedding.lean:351:67: error: unsolved goals
+Test/Unit/Embedding.lean:368:67: error: unsolved goals
 p : ℚ → Prop
 w : ℚ
 h : p w
 ⊢ ∃ x ≥ 0, p x
-Test/Unit/Embedding.lean:355:2: error: [poly_norm] expected a rational number, got x.7380
+Test/Unit/Embedding.lean:372:2: error: [poly_norm] expected a rational number, got x.7380
 goal: False
 
 query:
@@ -82,16 +84,16 @@ query:
 (declare-const y Int)
 (assert (distinct (f x y) (ite (exists ((a Int)) (exists ((b Int)) (= (f (to_real y) (to_int x)) (/ (to_real a) (to_real b))))) (f (to_real y) (to_int x)) 0.0)))
 (check-sat)
-Test/Unit/Embedding.lean:357:83: error: unsolved goals
+Test/Unit/Embedding.lean:374:83: error: unsolved goals
 f : ℚ → ℤ → ℚ
 x : ℚ
 y : ℤ
 h : ↑y = x
 h' : f x y ≠ f ↑y ⌊x⌋
 ⊢ False
-Test/Unit/Embedding.lean:372:108: warning: unused variable `next`
+Test/Unit/Embedding.lean:389:108: warning: unused variable `next`
 
 Note: This linter can be disabled with `set_option linter.unusedVariables false`
-Test/Unit/Embedding.lean:373:3: warning: unused variable `st_leader`
+Test/Unit/Embedding.lean:390:3: warning: unused variable `st_leader`
 
 Note: This linter can be disabled with `set_option linter.unusedVariables false`
