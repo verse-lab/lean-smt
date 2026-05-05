@@ -16,6 +16,7 @@ public meta section
 
 namespace Smt.Translate.Int
 
+open Lean Expr
 open Translator Term
 
 private def mkInt : Lean.Expr :=
@@ -28,6 +29,8 @@ private def mkInt : Lean.Expr :=
 @[smt_translate] def translateInt : Translator := fun e => do
   if let some n := e.natLitOf? mkInt then
     return literalT (toString n)
+  else if let some n := natCastInt? e then
+    return ← applyTranslators! n
   else if let some x := e.negOf? mkInt then
     return appT (symbolT "-") (← applyTranslators! x)
   else if let some (x, y) := e.hAddOf? mkInt mkInt then
@@ -42,6 +45,11 @@ private def mkInt : Lean.Expr :=
     return mkApp2 (symbolT "mod") (← applyTranslators! x) (← applyTranslators! y)
   else
     return none
+where
+  natCastInt? : Expr → Option Expr
+    | .app (.app (.app (.const ``Nat.cast _) α) _) n =>
+      if α.consumeMData == mkInt then some n else none
+    | _ => none
 
 @[smt_translate] def translateProp : Translator := fun e => do
   if let some (x, y) := e.ltOf? mkInt then

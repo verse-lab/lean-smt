@@ -43,6 +43,11 @@ def EmbeddingConfig.baseTypes (cfg : EmbeddingConfig) : MetaM (Array Name) := do
     bts := bts.push ``Bool
   return bts
 
+private def isFinType (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .app (.const ``Fin []) _ => true
+  | _                        => false
+
 def hasType (e : Expr) (p : Expr → Bool) : Bool :=
   match e with
   | .forallE _ t b _ => p t || hasType b p
@@ -63,7 +68,7 @@ def embeddingWithConfig (cfg : EmbeddingConfig) (mv : MVarId) (hs : Array Expr) 
   if bts.isEmpty then
     return ⟨{}, hs, mv⟩
   let fvts ← fvs.mapM FVarId.getType
-  if !(fvts ++ ts.push (← mv.getType)).any (·.contains ((bts.map (.const · [])).contains ·)) then
+  if !(fvts ++ ts.push (← mv.getType)).any (·.contains (fun e => (bts.map (.const · [])).contains e.consumeMData || (cfg.embedNat && isFinType e))) then
     return ⟨{}, hs, mv⟩
   -- Find the embedding simp theorems.
   let some thmsExt ← Meta.getSimpExtension? `embedding | throwError "embedding simp extension not found"
@@ -93,7 +98,7 @@ def embeddingWithConfig (cfg : EmbeddingConfig) (mv : MVarId) (hs : Array Expr) 
   for fv in fvs do
     fvs' := fvs'.push (some fv)
     let t ← fv.getType
-    if hasReturnType t ((bts.map (.const · [])).contains ·) then
+    if hasReturnType t (fun e => (bts.map (.const · [])).contains e.consumeMData || (cfg.embedNat && isFinType e)) then
       fvs' := fvs'.push none
   -- Re-introduce all free vars (and their `nonneg` assumptions).
   let (fvs'', mv) ← mv.introNP fvs'.size
