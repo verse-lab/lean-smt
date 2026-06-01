@@ -7,8 +7,6 @@ Authors: Abdalrhman Mohamed
 
 /- abbrev Implies (p q : Prop) := p → q -/
 
-import Mathlib.Data.List.Nodup
-
 inductive XOr (p q : Prop) : Prop where
   | inl : p → ¬q → XOr p q
   | inr : ¬p → q → XOr p q
@@ -108,7 +106,8 @@ theorem distinctN_getElem_ne {α : Type u} {xs : List α} (h : distinctN xs)
     xs[i] ≠ xs[j] := by
   intro hEq
   have hn : xs.Nodup := (distinctN_pairwise_neq xs).1 h
-  exact hij ((List.Nodup.getElem_inj_iff hn).1 hEq)
+  unfold List.Nodup at hn ; rw [List.pairwise_iff_getElem] at hn
+  grind
 
 instance [DecidableEq α] {xs : List α} : Decidable (distinctN xs) :=
   decidable_of_iff xs.Nodup (Iff.symm <| distinctN_pairwise_neq xs)

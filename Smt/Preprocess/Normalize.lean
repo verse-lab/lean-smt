@@ -13,7 +13,7 @@ namespace Smt.Preprocess
 
 open Lean
 
-def normalize (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
+def normalize (mv : MVarId) (hs : Array Expr) : MetaM Result := withTraceNode (`smt.perf.preprocess ++ `normalize) (fun _ => return "normalize") do mv.withContext do
   -- Find the smt_normalize simp theorems.
   let some thmsExt ← Meta.getSimpExtension? `smt_normalize | throwError "smt_normalize simp extension not found"
   let some procsExt ← Meta.Simp.getSimprocExtension? `smt_normalize | throwError "smt_normalize simproc extension not found"

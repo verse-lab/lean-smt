@@ -16,6 +16,21 @@ namespace Smt.Preprocess
 
 open Lean
 
+structure EmbeddingConfig where
+  embedNat : Bool := true
+  embedRat : Bool := true
+  embedBool : Bool := true
+
+def EmbeddingConfig.baseTypes (cfg : EmbeddingConfig) : MetaM (Array Name) := do
+  let mut bts := #[]
+  if cfg.embedNat then
+    bts := bts.push ``Nat
+  if cfg.embedRat && (← getEnv).contains `Real then
+    bts := bts.push ``Rat
+  if cfg.embedBool then
+    bts := bts.push ``Bool
+  return bts
+
 def hasType (e : Expr) (p : Expr → Bool) : Bool :=
   match e with
   | .forallE _ t b _ => p t || hasType b p
@@ -26,7 +41,7 @@ def hasReturnType (e : Expr) (p : Expr → Bool) : Bool :=
   | .forallE _ _ b _ => hasReturnType b p
   | _                => p e
 
-def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
+def embeddingWithConfig (cfg : EmbeddingConfig) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   withTraceNode (`smt.perf.preprocess ++ `embedding) (fun _ => return "embedding") do
   mv.withContext do
   -- Find all free vars to revert in `hs` and `mv`.
@@ -34,7 +49,9 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let ⟨_, _, fvs⟩ := (ts.push (← mv.getType)).foldl Lean.collectFVars {}
   let fvs ← Meta.sortFVarIds fvs
   -- Check if we need to do anything.
-  let bts := if (← getEnv).contains `Real then  #[``Nat, ``Rat, ``Bool] else #[``Nat, ``Bool]
+  let bts ← cfg.baseTypes
+  if bts.isEmpty then
+    return ⟨{}, hs, mv⟩
   let fvts ← fvs.mapM FVarId.getType
   if !(fvts ++ ts.push (← mv.getType)).any (·.contains ((bts.map (.const · [])).contains ·)) then
     return ⟨{}, hs, mv⟩
@@ -61,7 +78,7 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let ctx ← Meta.Simp.mkContext { zeta := false, singlePass := true } simpTheorems congrTheorems
   let (some mv, _) ← Meta.simpTarget mv ctx simpProcs (mayCloseGoal := false) | throwError "[embedding] simplification failed"
   -- Extend `fvs` to account for `nonneg` assumptions.
-  let bts := bts.pop -- Do not consider `Bool` for assumptions.
+  let bts := bts.filter (· != ``Bool) -- Do not consider `Bool` for assumptions.
   let mut fvs' : Array (Option FVarId) := #[]
   for fv in fvs do
     fvs' := fvs'.push (some fv)
@@ -88,5 +105,8 @@ where
   inverse (m : Std.HashMap Expr Expr) : Std.HashMap Expr Expr :=
     m.fold (init := {}) fun map k v =>
       map.insert v k
+
+def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
+  embeddingWithConfig {} mv hs
 
 end Smt.Preprocess

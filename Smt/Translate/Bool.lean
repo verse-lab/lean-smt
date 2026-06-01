@@ -15,11 +15,11 @@ open Translator Term
 private def mkBool : Lean.Expr :=
   .const ``Bool []
 
-@[smt_translate] def translateType : Translator := fun e => match e with
+@[scoped smt_translate] def translateType : Translator := fun e => match e with
   | .const ``Bool _ => return symbolT "Bool"
   | _               => return none
 
-@[smt_translate] def translateBool : Translator := fun e => do
+@[scoped smt_translate] def translateBool : Translator := fun e => do
   if let .const ``true _ := e then
     return symbolT "true"
   else if let .const ``false _ := e then
@@ -39,7 +39,7 @@ private def mkBool : Lean.Expr :=
   else
     return none
 
-@[smt_translate] def translateProp : Translator := fun e => do
+@[scoped smt_translate] def translateProp : Translator := fun e => do
   if let some (.const ``Bool _, a, b) := e.eq? then
     return mkApp2 (symbolT "=") (← applyTranslators! a) (← applyTranslators! b)
   else

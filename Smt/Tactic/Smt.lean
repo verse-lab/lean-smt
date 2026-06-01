@@ -41,6 +41,9 @@ structure Config where
   normalize : Bool := true
   /-- Whether to embed subtypes (e.g., `Nat`, `Bool`, `Rat`) into types understood by the SMT solver. -/
   embeddings : Bool := true
+  /-- Whether to embed `Bool` values `Prop`. **WARNING**: Currently, this can make proof reconstruction
+      or unsat core extraction fail! -/
+  embedBool : Bool := true
   /-- Whether to trust the result of the SMT solver. Closes the current goal with a `sorry` if the
       SMT solver returns `unsat`. **Warning**: use with caution, as this may lead to unsoundness.
       Additionally adds the translation from Lean to SMT to the trusted code base, which is not
@@ -176,7 +179,11 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let steps := if cfg.mono then #[Preprocess.mono] else #[Preprocess.pushHintsToCtx] ++
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
   let steps := if cfg.normalize then steps.push Preprocess.normalize else steps
-  let steps := if cfg.embeddings then steps.push Preprocess.embedding else steps
+  let steps :=
+    if cfg.embeddings then
+      steps.push <| Preprocess.embeddingWithConfig { embedBool := cfg.embedBool }
+    else
+      steps
   let ⟨map, hs₁, mv₁⟩ ← withTraceNode `smt.perf.preprocess (fun _ => return "preprocess") do
     Preprocess.applySteps mv₀ hs steps
   mv₁.withContext do
@@ -211,6 +218,13 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
     trace[smt.solve] "\nunknown reason:\n{r}\n"
     return .unknown r.toString
   | .ok (.unsat pf uc) =>
+    if cfg.trust then
+      -- 6. Trust the result by admitting original goal.
+      -- We make this a non-synthetic `sorry` because morally it is requested
+      -- by the user rather than showing a tactic failure.
+      mv.admit (synthetic := false)
+      asyncChannel.forM fun channel => do let _ ← channel.send ((id, .result (.unsat [] hs)))
+      return .unsat [] hs
     -- 5.c Reconstruct unsat core proofs.
     let ctx := { userNames := fvNames₂, native := cfg.native }
     let (uc, _) ← (uc.mapM Reconstruct.reconstructTerm).run ctx {}
@@ -220,13 +234,6 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
     let uc := uc.filterMap fun p => (hs₁[p]?)
     let uc := uc.filterMap (map[·]?)
     let uc := hs.filter uc.flatten.contains
-    if cfg.trust then
-      -- 6. Trust the result by admitting original goal.
-      -- We make this a non-synthetic `sorry` because morally it is requested
-      -- by the user rather than showing a tactic failure.
-      mv.admit (synthetic := false)
-      asyncChannel.forM fun channel => do let _ ← channel.send ((id, .result (.unsat [] uc)))
-      return .unsat [] uc
     -- 7. Reconstruct proof.
     let some pf := pf | throwError "failed to reconstruct proof for unsat result"
     let (_, ps, p, hp, mvs) ← withTraceNode `smt.perf.reconstruct (fun _ => return "reconstruct") do

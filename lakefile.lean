@@ -8,13 +8,16 @@ require auto from
 require cvc5 from
   git "https://github.com/abdoo8080/lean-cvc5.git" @ "ef0efbf"
 
-require mathlib from
-  git "https://github.com/leanprover-community/mathlib4.git" @ "v4.28.0"
+require Qq from git "https://github.com/leanprover-community/quote4" @ "v4.28.0"
+
+-- require mathlib from
+--   git "https://github.com/leanprover-community/mathlib4.git" @ "v4.28.0"
 
 package smt
 
 @[default_target]
-lean_lib Smt
+lean_lib Smt where
+  precompileModules := true
 
 lean_lib SmtTest where
   globs := #[Glob.submodules `Test]
