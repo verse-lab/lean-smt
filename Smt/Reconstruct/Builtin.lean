@@ -39,14 +39,9 @@ def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
       let c ← getConstInfo n.toName
       return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
 
-def buildDistinct (u : Level) (α : Q(Sort u)) (xs : List Q($α)) : Q(Prop) :=
-  go xs
-where
-  go : List Q($α) → Q(Prop)
-  | [] => q(True)
-  | [_] => q(True)
-  | [x, y] => q($x ≠ $y)
-  | x :: ys => ys.foldr (fun y ys => q($x ≠ $y ∧ $ys)) (go ys)
+def buildDistinct {u : Level} (α : Q(Type u)) (xs : List Q($α)) : MetaM Q(Prop) := do
+  let xs : Q(List $α) ← Meta.mkListLit α xs
+  return q(distinctN $xs)
 
 @[smt_term_reconstruct] def reconstructBuiltin : TermReconstructor := fun t => do match t.getKind! with
   | .VARIABLE => getFVarExpr! (getVariableName t)
@@ -57,9 +52,12 @@ where
     let y : Q($α) ← reconstructTerm t[1]!
     return q($x = $y)
   | .DISTINCT =>
-    let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort t[0]!.getSort!
-    let xs ← t.getChildren.mapM reconstructTerm
-    return buildDistinct u α xs.toList
+    let (u, α) ← reconstructSortLevelAndSort t[0]!.getSort!
+    -- Here `u` is for `α : Sort u`; `distinctN` expects `α : Type (u - 1)`.
+    let u ← Meta.decLevel u
+    let α : Q(Type $u) ← pure α
+    let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
+    buildDistinct α xs.toList
   | .ITE =>
     let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort t.getSort!
     let c : Q(Prop) ← reconstructTerm t[0]!

@@ -72,6 +72,38 @@ def impliesN (ps : List Prop) (q : Prop) : Prop := match ps with
 
 def notN : List Prop → List Prop := List.map Not
 
+-- CHECK Maybe need to replace this with `List.Nodup`
+def distinctPairs {α : Type u} (xs : List α) : List Prop :=
+  List.flatten <| Prod.snd <| xs.foldr (init := ([], [])) fun x (ys, acc) =>
+    (x :: ys, ys.map (fun y => x ≠ y) :: acc)
+
+def distinctN {α : Type u} (xs : List α) : Prop :=
+  andN (distinctPairs xs)
+
+theorem distinctN_cons {α : Type u} (x : α) (xs : List α) : distinctN (x :: xs) ↔ (distinctN xs ∧ ∀ y ∈ xs, x ≠ y) := by
+  dsimp only [distinctN, distinctPairs]
+  simp only [List.foldr_eq_foldl_reverse, List.reverse_cons, List.foldl_append]
+  dsimp only [List.foldl]
+  generalize h : (xs.reverse.foldl _ _) = res
+  have h' : res.1 = xs := by
+    subst res
+    induction xs with
+    | nil => grind
+    | cons y ys ih => simp only [List.reverse_cons, List.foldl_append, List.foldl, ih]
+  simp ; rw [and_comm] ; simp [h'] ; rintro -
+  clear h h'
+  induction xs with
+  | nil => simp [andN]
+  | cons y ys ih => simp [andN_cons_append, ih]
+
+theorem distinctN_pairwise_neq {α : Type u} (xs : List α) : distinctN xs ↔ xs.Nodup := by
+  induction xs with
+  | nil => simp [distinctN, distinctPairs, andN]
+  | cons x xs ih => simp [distinctN_cons] ; grind
+
+instance [DecidableEq α] {xs : List α} : Decidable (distinctN xs) :=
+  decidable_of_iff xs.Nodup (Iff.symm <| distinctN_pairwise_neq xs)
+
 namespace Smt.Reconstruct.Prop
 
 theorem and_assoc_eq : ((p ∧ q) ∧ r) = (p ∧ (q ∧ r)) := by

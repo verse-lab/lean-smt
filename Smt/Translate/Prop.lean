@@ -6,7 +6,9 @@ Authors: Abdalrhman Mohamed, Wojciech Nawrocki
 -/
 
 import Smt.Recognizers
+import Smt.Reconstruct.Prop.Core
 import Smt.Translate
+import Lean
 
 namespace Smt.Translate.Prop
 
@@ -28,6 +30,12 @@ private def mkBool : Lean.Expr :=
     return symbolT "true"
   else if let .const ``False _ := e then
     return symbolT "false"
+  else if e.isAppOfArity' ``distinctN 2 then
+    let some (_, xs) := e.appArg!.listLit? | return none
+    if xs.length < 2 then
+      return symbolT "true"
+    else
+      return Term.mkAppN (symbolT "distinct") (← xs.mapM applyTranslators!)
   else if let some p := e.not? then
     return appT (symbolT "not") (← applyTranslators! p)
   else if let some (p, q) := e.and? then

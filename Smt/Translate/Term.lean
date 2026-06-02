@@ -41,6 +41,9 @@ def mkApp3 (f a b c : Term) : Term :=
 def mkApp4 (f a b c d : Term) : Term :=
   appT (appT (appT (appT f a) b) c) d
 
+def mkAppN (f : Term) (args : List Term) : Term :=
+  args.foldl appT f
+
 /-- SMT-LIBv2 quoting for symbols. -/
 def quoteSymbol (s : String) : String :=
   -- This is the set of SMT-LIBv2 permitted characters in "simple" (non-quoted)

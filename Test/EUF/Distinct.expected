@@ -1,0 +1,13 @@
+goal: distinctN [a, b, c]
+
+query:
+(set-logic ALL)
+(declare-sort U 0)
+(declare-const b U)
+(declare-const c U)
+(assert (distinct b c))
+(declare-const a U)
+(assert (distinct a c))
+(assert (distinct a b))
+(assert (not (distinct a b c)))
+(check-sat)
