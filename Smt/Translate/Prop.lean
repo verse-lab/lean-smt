@@ -21,6 +21,20 @@ private def mkProp : Lean.Expr :=
 private def mkBool : Lean.Expr :=
   toTypeExpr Bool
 
+private partial def listLitWithLets? (e : Lean.Expr) : Option (Lean.Expr × List Lean.Expr) :=
+  go e #[]
+where
+  go (e : Lean.Expr) (acc : Array Lean.Expr) : Option (Lean.Expr × List Lean.Expr) :=
+    let e := e.consumeMData
+    match e with
+    | .letE _ _ val body _ => go (body.instantiate1 val) acc
+    | .app (.app (.app (.const ``List.cons _) _) x) xs => go xs (acc.push x)
+    | .app (.const ``List.nil _) α => some (α, acc.toList)
+    | _ =>
+      match e.listLit? with
+      | some (α, xs) => some (α, acc.toList ++ xs)
+      | none => none
+
 @[smt_translate] def translateType : Translator := fun e => match e with
   | .sort 0        => return symbolT "Bool"
   | _              => return none
@@ -31,7 +45,10 @@ private def mkBool : Lean.Expr :=
   else if let .const ``False _ := e then
     return symbolT "false"
   else if e.isAppOfArity' ``distinctN 2 then
-    let some (_, xs) := e.appArg!.listLit? | return none
+    -- Large source list literals are elaborated with `let` chunks, which
+    -- `Expr.listLit?` does not see through. Reduce those chunks in the list
+    -- spine so `distinctN [a0, ..., an]` still becomes one SMT-LIB `distinct`.
+    let some (_, xs) := listLitWithLets? e.appArg! | return none
     if xs.length < 2 then
       return symbolT "true"
     else
