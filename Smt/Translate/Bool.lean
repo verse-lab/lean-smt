@@ -40,8 +40,25 @@ private def mkBool : Lean.Expr :=
     return none
 
 @[scoped smt_translate] def translateProp : Translator := fun e => do
-  if let some (.const ``Bool _, a, b) := e.eq? then
-    return mkApp2 (symbolT "=") (← applyTranslators! a) (← applyTranslators! b)
+  let .app (.app (.app f (.const ``Bool _)) a) b := e | return none
+  if f.isConstOf ``Eq then
+    match a.constName? with
+    | ``true => applyTranslators! b
+    | ``false => return appT (symbolT "not") (← applyTranslators! b)
+    | _ =>
+      match b.constName? with
+      | ``true => applyTranslators! a
+      | ``false => return appT (symbolT "not") (← applyTranslators! a)
+      | _ => return mkApp2 (symbolT "=") (← applyTranslators! a) (← applyTranslators! b)
+  else if f.isConstOf ``Ne then
+    match a.constName? with
+    | ``true => return appT (symbolT "not") (← applyTranslators! b)
+    | ``false => applyTranslators! b
+    | _ =>
+      match b.constName? with
+      | ``true => return appT (symbolT "not") (← applyTranslators! a)
+      | ``false => applyTranslators! a
+      | _ => return mkApp2 (symbolT "distinct") (← applyTranslators! a) (← applyTranslators! b)
   else
     return none
 

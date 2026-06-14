@@ -1,0 +1,13 @@
+goal: ∀ (p : Bool), p = true → p = false → p ≠ true → p ≠ false → ¬p = true → ¬p = false → True
+
+query:
+(set-logic ALL)
+(declare-const |p✝| Bool)
+(assert |p✝|)
+(assert (not |p✝|))
+(assert (not |p✝|))
+(assert |p✝|)
+(assert (not |p✝|))
+(assert (not (not |p✝|)))
+(assert (not true))
+(check-sat)
