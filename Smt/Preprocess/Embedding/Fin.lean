@@ -54,16 +54,17 @@ theorem forall_fin_as_int {n : Nat} {p : Fin n → Prop} :
 @[embedding ↓]
 theorem exists_fin_as_int {n : Nat} {p : Fin n → Prop} :
     (∃ x : Fin n, p x) ↔
-    (∃ x : Int, ∃ h : 0 ≤ x ∧ x < n, p (ofIntFin n x h)) := by
+    (∃ x : Int, (0 ≤ x ∧ x < n) ∧
+      if h : 0 ≤ x ∧ x < n then p (ofIntFin n x h) else False) := by
   constructor
   · intro ⟨x, hx⟩
-    refine ⟨(x : Nat), ?_, ?_⟩
-    · constructor
+    have h : 0 ≤ ((x : Nat) : Int) ∧ ((x : Nat) : Int) < n := by
+      constructor
       · exact Int.natCast_nonneg x.val
       · exact_mod_cast x.isLt
-    · simpa [ofIntFin_of_fin] using hx
+    exact ⟨(x : Nat), h, by simpa [h, ofIntFin_of_fin] using hx⟩
   · intro ⟨x, hx, hp⟩
-    exact ⟨ofIntFin n x hx, hp⟩
+    exact ⟨ofIntFin n x hx, by simpa [hx] using hp⟩
 
 @[embedding ↓]
 theorem forall_fin_out_as_int₁ {n : Nat} {p : (α₁ → Fin n) → Prop} :
