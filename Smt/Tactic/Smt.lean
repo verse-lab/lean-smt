@@ -261,10 +261,26 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
     let (ufsRaw, state) ← (ufs.mapM Reconstruct.reconstructTerm).run ctx state
     let (vsRaw, _) ← (vs.mapM Reconstruct.reconstructTerm).run ctx state
     let valueEntries ← (ufsRaw.zip vsRaw).filterMapM fun (uf, value) => do
-      let symbol := ModelAdapter.replaceModelFVars modelMap (modelMap[uf]?.getD uf)
-      if !(← mv₀.withContext <| ModelAdapter.modelExprInContext symbol) then
-        return none
       let value := ModelAdapter.replaceModelFVars modelMap value
+      let some symbol ← (mv₀.withContext do
+        let valueType ← Meta.inferType value
+        match modelMap[uf]? with
+        | some origin =>
+          let origin := ModelAdapter.replaceModelFVars modelMap origin
+          if (← ModelAdapter.modelExprInContext origin) then
+            let originType ← Meta.inferType origin
+            if ← ModelAdapter.mayHaveModelOrigin valueType originType then
+              return some origin
+            else
+              return none
+          else
+            return none
+        | none =>
+          if (← ModelAdapter.modelExprInContext uf) then
+            return some uf
+          else
+            return none
+        ) | return none
       let value ← mv₀.withContext do
         let fromType ← Meta.inferType value
         let toType ← Meta.inferType symbol

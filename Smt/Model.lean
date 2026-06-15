@@ -153,6 +153,47 @@ partial def supportsModelAdaptation (fromType toType : Expr) : MetaM Bool := do
       (Expr.isRealType fromType && Expr.isRatType toType) ||
       (Expr.isRatType fromType && Expr.isRealType toType)
 
+private def isKnownModelType (type : Expr) : MetaM Bool := do
+  let type ← normalizeModelExpr type
+  pure <|
+    Expr.isPropType type ||
+    Expr.isBoolType type ||
+    Expr.isIntType type ||
+    Expr.isNatType type ||
+    Expr.isRatType type ||
+    Expr.isRealType type ||
+    (Expr.finSize? type).isSome
+
+partial def mayHaveModelOrigin (valueType originType : Expr) : MetaM Bool := do
+  let valueType ← normalizeModelExpr valueType
+  let originType ← normalizeModelExpr originType
+  if ← supportsModelAdaptation valueType originType then
+    return true
+  let valueTypeWhnf ← Meta.whnf valueType
+  let originTypeWhnf ← Meta.whnf originType
+  if valueTypeWhnf.isForall || originTypeWhnf.isForall then
+    if !(valueTypeWhnf.isForall && originTypeWhnf.isForall) then
+      return false
+    else
+      Meta.forallTelescopeReducing originType fun originArgs originRetType => do
+        Meta.forallTelescopeReducing valueType fun valueArgs valueRetType => do
+          if originArgs.size != valueArgs.size then
+            return false
+          let mut supported := true
+          for i in [:originArgs.size] do
+            if supported then
+              let originArgType ← normalizeModelExpr (← Meta.inferType originArgs[i]!)
+              let valueArgType ← normalizeModelExpr (← Meta.inferType valueArgs[i]!)
+              supported := ← mayHaveModelOrigin originArgType valueArgType
+          if supported then
+            mayHaveModelOrigin valueRetType originRetType
+          else
+            return false
+  else if (Expr.finSize? valueType).isSome && !(← isKnownModelType originType) then
+    return true
+  else
+    return false
+
 def ensureModelValueType (symbol value : Expr) : MetaM Unit := do
   let symbolType ← normalizeModelExpr (← Meta.inferType symbol)
   let valueType ← normalizeModelExpr (← Meta.inferType value)

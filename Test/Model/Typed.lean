@@ -51,6 +51,26 @@ syntax (name := guardRawSatModel) "guard_raw_sat_model" : tactic
 
 opaque U : Type
 
+syntax (name := guardModelOriginPredicates) "guard_model_origin_predicates" : tactic
+
+@[tactic guardModelOriginPredicates] def evalGuardModelOriginPredicates : Tactic := fun _ => withMainContext do
+  let propType := mkSort levelZero
+  let finType := mkApp (mkConst ``Fin) (mkNatLit 10)
+  if ← Smt.ModelAdapter.mayHaveModelOrigin propType finType then
+    throwError "Prop-valued model entries must not be mapped to Fin origins"
+  let unknownType := mkConst ``U
+  let finOneType := mkApp (mkConst ``Fin) (mkNatLit 1)
+  unless ← Smt.ModelAdapter.mayHaveModelOrigin finOneType unknownType do
+    throwError "Fin-valued model entries should be allowed for unknown downstream sorts"
+  let mv ← getMainGoal
+  mv.admit
+  replaceMainGoal []
+
+/-- warning: declaration uses `sorry` -/
+#guard_msgs in
+example : True := by
+  guard_model_origin_predicates
+
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in
 example (p : Bool) : p = !p := by
@@ -96,3 +116,20 @@ example (x y : U) : x = y := by
 example (latestPlan otherPlan : Fin 4) (guard : Bool) (enabled : Fin 4 → Bool) :
     enabled latestPlan = guard ∧ latestPlan = otherPlan := by
   guard_typed_sat_model
+
+theorem AWSDnsRace_EnactorApply_DnsConsistent_extracted_1_5 (Enactor EnactorPC PlanId : Type) [LT PlanId] (NoPlan : PlanId) (self : Enactor)
+  (st_dns_valid : Bool) (hinv : st_dns_valid = true) (st_plan_deleted : PlanId → Bool)
+  (st_enactor_processing : Enactor → PlanId) (st_enactor_pc : Enactor → EnactorPC)
+  (st_enactor_snapshot_current : Enactor → PlanId)
+  (EnactorPC_Enum_Receive EnactorPC_Enum_Apply EnactorPC_Enum_Cleanup EnactorPC_Enum_RemoveActiveDNS : EnactorPC)
+  (EnactorPC_Enum_distinct :
+    distinctN [EnactorPC_Enum_Receive, EnactorPC_Enum_Apply, EnactorPC_Enum_Cleanup, EnactorPC_Enum_RemoveActiveDNS])
+  (EnactorPC_Enum_complete :
+    ∀ (__veil_x : EnactorPC),
+      __veil_x = EnactorPC_Enum_Receive ∨
+        __veil_x = EnactorPC_Enum_Apply ∨
+          __veil_x = EnactorPC_Enum_Cleanup ∨ __veil_x = EnactorPC_Enum_RemoveActiveDNS) :
+  st_enactor_pc self = EnactorPC_Enum_Apply →
+    (st_enactor_snapshot_current self < st_enactor_processing self ∨ st_enactor_snapshot_current self = NoPlan →
+        st_plan_deleted (st_enactor_processing self) = true) →
+      st_dns_valid = true := by smt +mono [*]
