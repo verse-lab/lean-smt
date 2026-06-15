@@ -33,14 +33,14 @@ def elimIff (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let t ← instantiateMVars (← mv.getType)
   let ts ← hs.mapM (Meta.inferType · >>= instantiateMVars)
   if !(containsIff t || ts.any containsIff) then
-    return { map := Std.HashMap.insertMany ∅ (hs.zip (hs.map .singleton)), hs, mv }
+    return { map := Std.HashMap.insertMany ∅ (hs.zip (hs.map .singleton)), modelMap := {}, hs, mv }
   let simpTheorems ← #[``eq_self, ``iff_eq_eq].foldlM (·.addConst ·) ({} : Meta.SimpTheorems)
   let simpTheorems := #[simpTheorems]
   let congrTheorems ← Meta.getSimpCongrTheorems
   let ctx ← Meta.Simp.mkContext {} simpTheorems congrTheorems
   let (hs', mv') ← elimIffLocalDecls mv hs.toList ctx #[]
   let mv' ← elimIffTarget mv' ctx
-  return { map := Std.HashMap.insertMany ∅ (hs'.zip (hs.map .singleton)), hs := hs', mv := mv' }
+  return { map := Std.HashMap.insertMany ∅ (hs'.zip (hs.map .singleton)), modelMap := {}, hs := hs', mv := mv' }
 where
   elimIffLocalDecls mv hs ctx hs' := do match hs with
     | [] => return (hs', mv)

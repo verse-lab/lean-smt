@@ -231,8 +231,10 @@ def mono (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let map := dtrs.foldl (init := map) fun map (fv, dtr) =>
     let usedHints := invMap.filter (fun k _ => dtr.contains k)
     map.insert (.fvar fv) usedHints.valuesArray
+  let modelMap := fvs.foldl (init := {}) fun map (fv, e) =>
+    if e.isFVar || e.isConst then map.insert (.fvar fv) e else map
   let hs ← mv.withContext (return (← getPropHyps).map Expr.fvar)
   trace[smt.preprocess] "goal: {mv}"
-  return { map, hs, mv }
+  return { map, modelMap, hs, mv }
 
 end Smt.Preprocess

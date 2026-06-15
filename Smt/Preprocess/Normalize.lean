@@ -42,8 +42,9 @@ def normalize (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext d
   let inverseMap₂ := Std.HashMap.ofList ((fvs'.zip fvs'').map fun (of, to) => (.fvar of, .fvar to)).toList
   let inverseMap := compose inverseMap₁ inverseMap₂
   let hs' := hs.map fun h => inverseMap[h]?.getD h
-  let map := (inverse inverseMap).fold (init := {}) fun map k v => map.insert k #[v]
-  return { map := map, hs := hs', mv }
+  let modelMap := inverse inverseMap
+  let map := modelMap.fold (init := {}) fun map k v => map.insert k #[v]
+  return { map := map, modelMap, hs := hs', mv }
 where
   compose (m₁ m₂ : Std.HashMap Expr Expr) : Std.HashMap Expr Expr :=
     m₁.fold (init := m₂) fun map k v =>

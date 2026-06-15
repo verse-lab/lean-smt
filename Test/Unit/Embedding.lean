@@ -12,14 +12,14 @@ open Lean Elab Tactic in
     let mv ← getMainGoal
     let hs ← hs.getElems.mapM (Term.elabTerm · none)
     Lean.logInfo m!"Before: {hs}"
-    let ⟨map, hs, mv⟩ ← Smt.Preprocess.embedding mv hs
+    let ⟨map, _, hs, mv⟩ ← Smt.Preprocess.embedding mv hs
     mv.withContext (Lean.logInfo m!"After: {hs}")
     mv.withContext (Lean.logInfo m!"Map: {map.toList}")
     (Lean.logInfo m!"Map: {map.toList}")
     replaceMainGoal [mv]
   | `(tactic| embedding) => withMainContext do
     let mv ← getMainGoal
-    let ⟨map, _, mv⟩ ← Smt.Preprocess.embedding mv #[]
+    let ⟨map, _, _, mv⟩ ← Smt.Preprocess.embedding mv #[]
     mv.withContext (Lean.logInfo m!"Map: {map.toList}")
     (Lean.logInfo m!"Map: {map.toList}")
     replaceMainGoal [mv]

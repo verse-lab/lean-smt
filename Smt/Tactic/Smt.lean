@@ -9,6 +9,7 @@ import Lean
 import Lean.Meta.Tactic.TryThis
 
 import Smt.Dsl.Sexp
+import Smt.Model
 import Smt.Reconstruct
 import Smt.Reconstruct.Prop.Lemmas
 import Smt.Translate.Query
@@ -177,7 +178,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
   let steps := if cfg.normalize then steps.push Preprocess.normalize else steps
   let steps := if cfg.embeddings then steps.push Preprocess.embedding else steps
-  let ⟨map, hs₁, mv₁⟩ ← withTraceNode `smt.perf.preprocess (fun _ => return "preprocess") do
+  let ⟨map, modelMap, hs₁, mv₁⟩ ← withTraceNode `smt.perf.preprocess (fun _ => return "preprocess") do
     Preprocess.applySteps mv₀ hs steps
   mv₁.withContext do
   -- 3. Generate the SMT query.
@@ -247,15 +248,36 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
     let cs := es.map Array.size
     let sortCard := Std.HashMap.insertMany ∅ (uss.zip cs)
     let ctx := { userNames := fvNames₂, sortCard := sortCard, native := cfg.native }
-    let (uss', _) ← (uss.mapM Reconstruct.reconstructSort).run ctx {}
-    let uss' := uss'.map fun us => (map[us]?.getD #[us])[0]?.getD us
+    let (ussRaw, _) ← (uss.mapM Reconstruct.reconstructSort).run ctx {}
     let cs' := cs.map (fun n => .app (.const ``Fin []) (toExpr n))
+    let sortEntries ← (ussRaw.zip cs').filterMapM fun (us, card) => do
+      let us := ModelAdapter.replaceModelFVars modelMap (modelMap[us]?.getD us)
+      if ← mv₀.withContext <| ModelAdapter.modelExprInContext us then
+        return some (us, card)
+      else
+        return none
     let state := { sortCache := Std.HashMap.insertMany ∅ (uss.zip cs') }
     let (ufs, vs) := model.ifs.unzip
-    let (ufs', state) ← (ufs.mapM Reconstruct.reconstructTerm).run ctx state
-    let ufs' := ufs'.map fun uf => (map[uf]?.getD #[uf])[0]?.getD uf
-    let (vs', _) ← (vs.mapM Reconstruct.reconstructTerm).run ctx state
-    let model := { ctx := ← mv₀.withContext ModelContext.save, sorts := uss'.zip cs', values := ufs'.zip vs' }
+    let (ufsRaw, state) ← (ufs.mapM Reconstruct.reconstructTerm).run ctx state
+    let (vsRaw, _) ← (vs.mapM Reconstruct.reconstructTerm).run ctx state
+    let valueEntries ← (ufsRaw.zip vsRaw).filterMapM fun (uf, value) => do
+      let symbol := ModelAdapter.replaceModelFVars modelMap (modelMap[uf]?.getD uf)
+      if !(← mv₀.withContext <| ModelAdapter.modelExprInContext symbol) then
+        return none
+      let fromType := ModelAdapter.replaceModelFVars modelMap (← Meta.inferType uf)
+      let value := ModelAdapter.replaceModelFVars modelMap value
+      let value ← mv₀.withContext do
+        let toType ← Meta.inferType symbol
+        let value ← ModelAdapter.adaptModelValue value fromType toType
+        let value ←
+          if (← Meta.whnf toType).isForall then
+            pure value
+          else
+            ModelAdapter.normalizeModelExpr value
+        ModelAdapter.ensureModelValueType symbol value
+        return value
+      return some (symbol, value)
+    let model := { ctx := ← mv₀.withContext ModelContext.save, sorts := sortEntries, values := valueEntries }
     asyncChannel.forM fun channel => do if sendResult then let _ ← channel.send ((id, .result (.sat (.some model))))
     return .sat (.some model)
   catch ex =>

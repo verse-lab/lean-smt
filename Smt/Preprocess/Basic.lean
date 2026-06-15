@@ -14,6 +14,7 @@ open Lean
 
 structure Result where
   map : Std.HashMap Expr (Array Expr)
+  modelMap : Std.HashMap Expr Expr
   hs : Array Expr
   mv : MVarId
 
@@ -40,18 +41,22 @@ def traceApplySteps (r : Except Exception Result) : MetaM MessageData :=
 def applySteps (mv : MVarId) (hs : Array Expr) (steps : Array (MVarId → Array Expr → MetaM Result)) : MetaM Result :=
   withTraceNode `smt.preprocess traceApplySteps do
   if h : 0 < steps.size then
-    let mut { map, hs, mv } ← steps[0] mv hs
+    let mut { map, modelMap, hs, mv } ← steps[0] mv hs
     for step in steps[1:] do
-      let ⟨map', hs', mv'⟩ ← step mv hs
+      let ⟨map', modelMap', hs', mv'⟩ ← step mv hs
       map := compose map map'
+      modelMap := composeModel modelMap modelMap'
       hs := hs'
       mv := mv'
-    return { map, hs, mv }
+    return { map, modelMap, hs, mv }
   else
-    return Result.mk {} #[] mv
+    return Result.mk {} {} #[] mv
 where
   compose (m₁ m₂ : Std.HashMap Expr (Array Expr)) : Std.HashMap Expr (Array Expr) :=
     m₂.fold (init := m₁) fun map k v =>
       map.insert k (v.map fun x => m₁.getD x #[x]).flatten
+  composeModel (m₁ m₂ : Std.HashMap Expr Expr) : Std.HashMap Expr Expr :=
+    m₂.fold (init := m₁) fun map k v =>
+      map.insert k (m₁.getD v v)
 
 end Smt.Preprocess

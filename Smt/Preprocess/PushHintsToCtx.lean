@@ -14,7 +14,7 @@ open Lean
 
 def pushHintsToCtx (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   withTraceNode (`smt.perf.preprocess ++ `pushHintsToCtx) (fun _ => return "pushHintsToCtx") do
-  hs.foldrM pushHint { map := {}, hs := #[], mv }
+  hs.foldrM pushHint { map := {}, modelMap := {}, hs := #[], mv }
 where
   pushHint (h : Expr) (r : Result) : MetaM Result := do
     if h.isFVar || h.isConst then
@@ -23,6 +23,6 @@ where
       let mv' ← r.mv.assert (← mkFreshId) (← Meta.inferType h) h
       let ⟨fv, mv'⟩ ← mv'.intro1
       let h' := .fvar fv
-      return { map := r.map.insert h' #[h], hs := r.hs.push h', mv := mv' }
+      return { r with map := r.map.insert h' #[h], hs := r.hs.push h', mv := mv' }
 
 end Smt.Preprocess

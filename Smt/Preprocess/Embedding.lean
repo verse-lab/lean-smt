@@ -53,7 +53,7 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
   let includeRat := (← getEnv).contains `Real
   let fvts ← fvs.mapM FVarId.getType
   if !(fvts ++ ts.push (← mv.getType)).any (·.contains (isEmbeddingType includeRat)) then
-    return ⟨{}, hs, mv⟩
+    return { map := {}, modelMap := {}, hs, mv }
   -- Find the embedding simp theorems.
   let some thmsExt ← Meta.getSimpExtension? `embedding | throwError "embedding simp extension not found"
   let some procsExt ← Meta.Simp.getSimprocExtension? `embedding | throwError "embedding simproc extension not found"
@@ -94,8 +94,9 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result :=
     | none    => (map, hs'.push (.fvar to))
   let inverseMap := compose inverseMap₁ inverseMap₂
   let hs' := hs' ++ hs.map fun h => inverseMap[h]?.getD h
-  let map := (inverse inverseMap).fold (init := {}) fun map k v => map.insert k #[v]
-  return { map := map, hs := hs', mv }
+  let modelMap := inverse inverseMap
+  let map := modelMap.fold (init := {}) fun map k v => map.insert k #[v]
+  return { map := map, modelMap, hs := hs', mv }
 where
   compose (m₁ m₂ : Std.HashMap Expr Expr) : Std.HashMap Expr Expr :=
     m₁.fold (init := m₂) fun map k v =>

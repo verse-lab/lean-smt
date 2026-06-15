@@ -30,6 +30,6 @@ def intros (mv : MVarId) (hs : Array Expr) : MetaM Result := do
   let (fvs, mv) ← mv.intros
   let fvs ← mv.withContext (fvs.filterM isPropHyp)
   let hfvs := fvs.map Expr.fvar
-  return { map := Std.HashMap.insertMany {} (hfvs.zip (hfvs.map (#[·]))), hs := hs ++ hfvs, mv }
+  return { map := Std.HashMap.insertMany {} (hfvs.zip (hfvs.map (#[·]))), modelMap := {}, hs := hs ++ hfvs, mv }
 
 end Smt.Preprocess
