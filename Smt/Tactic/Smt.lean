@@ -264,18 +264,21 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result :=
       let symbol := ModelAdapter.replaceModelFVars modelMap (modelMap[uf]?.getD uf)
       if !(← mv₀.withContext <| ModelAdapter.modelExprInContext symbol) then
         return none
-      let fromType := ModelAdapter.replaceModelFVars modelMap (← Meta.inferType uf)
       let value := ModelAdapter.replaceModelFVars modelMap value
       let value ← mv₀.withContext do
+        let fromType ← Meta.inferType value
         let toType ← Meta.inferType symbol
-        let value ← ModelAdapter.adaptModelValue value fromType toType
-        let value ←
-          if (← Meta.whnf toType).isForall then
-            pure value
-          else
-            ModelAdapter.normalizeModelExpr value
-        ModelAdapter.ensureModelValueType symbol value
-        return value
+        if ← ModelAdapter.supportsModelAdaptation fromType toType then
+          let value ← ModelAdapter.adaptModelValue value fromType toType
+          let value ←
+            if (← Meta.whnf toType).isForall then
+              pure value
+            else
+              ModelAdapter.normalizeModelExpr value
+          ModelAdapter.ensureModelValueType symbol value
+          return value
+        else
+          return value
       return some (symbol, value)
     let model := { ctx := ← mv₀.withContext ModelContext.save, sorts := sortEntries, values := valueEntries }
     asyncChannel.forM fun channel => do if sendResult then let _ ← channel.send ((id, .result (.sat (.some model))))

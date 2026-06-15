@@ -30,6 +30,27 @@ syntax (name := guardTypedSatModel) "guard_typed_sat_model" : tactic
   | .unknown reason =>
     throwError "expected a satisfiable counterexample query, got unknown: {reason}"
 
+syntax (name := guardRawSatModel) "guard_raw_sat_model" : tactic
+
+@[tactic guardRawSatModel] def evalGuardRawSatModel : Tactic := fun _ => withMainContext do
+  let mv ← getMainGoal
+  let hs := (← Smt.Preprocess.getPropHyps).map Expr.fvar
+  let result ← Smt.smt { model := true, extraSolverOptions := [("finite-model-find", "true")] } mv hs
+  match result with
+  | .sat (.some model) =>
+    if model.values.isEmpty then
+      throwError "expected a non-empty SMT model"
+    mv.admit
+    replaceMainGoal []
+  | .sat none =>
+    throwError "expected SMT solver to produce a model"
+  | .unsat .. =>
+    throwError "expected a satisfiable counterexample query"
+  | .unknown reason =>
+    throwError "expected a satisfiable counterexample query, got unknown: {reason}"
+
+opaque U : Type
+
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in
 example (p : Bool) : p = !p := by
@@ -64,6 +85,11 @@ example (f : Nat → Fin 5) : f 0 = f 1 := by
 #guard_msgs in
 example (x : Rat) : x = 0 := by
   guard_typed_sat_model
+
+/-- warning: declaration uses `sorry` -/
+#guard_msgs in
+example (x y : U) : x = y := by
+  guard_raw_sat_model
 
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in

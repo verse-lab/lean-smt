@@ -117,6 +117,42 @@ partial def adaptModelValue (value fromType toType : Expr) : MetaM Expr := do
   else
     throwError "could not adapt SMT model expression of type\n  {fromType}\nto expected type\n  {toType}"
 
+partial def supportsModelAdaptation (fromType toType : Expr) : MetaM Bool := do
+  let fromType ← normalizeModelExpr fromType
+  let toType ← normalizeModelExpr toType
+  if ← Meta.isDefEq fromType toType then
+    return true
+  let fromTypeWhnf ← Meta.whnf fromType
+  let toTypeWhnf ← Meta.whnf toType
+  if fromTypeWhnf.isForall || toTypeWhnf.isForall then
+    if !(fromTypeWhnf.isForall && toTypeWhnf.isForall) then
+      return false
+    else
+      Meta.forallTelescopeReducing toType fun toArgs toRetType => do
+        Meta.forallTelescopeReducing fromType fun fromArgs fromRetType => do
+          if toArgs.size != fromArgs.size then
+            return false
+          let mut supported := true
+          for i in [:toArgs.size] do
+            if supported then
+              let toArgType ← normalizeModelExpr (← Meta.inferType toArgs[i]!)
+              let fromArgType ← normalizeModelExpr (← Meta.inferType fromArgs[i]!)
+              supported := ← supportsModelAdaptation toArgType fromArgType
+          if supported then
+            supportsModelAdaptation fromRetType toRetType
+          else
+            return false
+  else
+    pure <|
+      (Expr.isPropType fromType && Expr.isBoolType toType) ||
+      (Expr.isBoolType fromType && Expr.isPropType toType) ||
+      (Expr.isIntType fromType && Expr.isNatType toType) ||
+      (Expr.isNatType fromType && Expr.isIntType toType) ||
+      (Expr.isIntType fromType && (Expr.finSize? toType).isSome) ||
+      ((Expr.finSize? fromType).isSome && Expr.isIntType toType) ||
+      (Expr.isRealType fromType && Expr.isRatType toType) ||
+      (Expr.isRatType fromType && Expr.isRealType toType)
+
 def ensureModelValueType (symbol value : Expr) : MetaM Unit := do
   let symbolType ← normalizeModelExpr (← Meta.inferType symbol)
   let valueType ← normalizeModelExpr (← Meta.inferType value)
