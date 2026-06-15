@@ -6,11 +6,19 @@ open Lean Elab Tactic
 private def checkTypedModel (model : Smt.Model) : TacticM Unit := do
   if model.values.isEmpty then
     throwError "expected a non-empty SMT model"
+  checkNoProofModelSymbols model
   for (symbol, value) in model.values do
     let symbolType ← Meta.reduceAll (← Meta.inferType symbol)
     let valueType ← Meta.reduceAll (← Meta.inferType value)
     unless ← Meta.isDefEq valueType symbolType do
       throwError "model value has the wrong type\nsymbol: {symbol}\nsymbol type: {symbolType}\nvalue: {value}\nvalue type: {valueType}"
+where
+  checkNoProofModelSymbols (model : Smt.Model) : TacticM Unit := do
+    for (symbol, value) in model.values do
+      let symbolType ← Meta.reduceAll (← Meta.inferType symbol)
+      let valueType ← Meta.reduceAll (← Meta.inferType value)
+      if ← Meta.isProp symbolType then
+        throwError "proof-valued symbol leaked into SMT model\nsymbol: {symbol}\nsymbol type: {symbolType}\nvalue: {value}\nvalue type: {valueType}"
 
 syntax (name := guardTypedSatModel) "guard_typed_sat_model" : tactic
 
@@ -40,6 +48,7 @@ syntax (name := guardRawSatModel) "guard_raw_sat_model" : tactic
   | .sat (.some model) =>
     if model.values.isEmpty then
       throwError "expected a non-empty SMT model"
+    checkTypedModel.checkNoProofModelSymbols model
     mv.admit
     replaceMainGoal []
   | .sat none =>
@@ -116,6 +125,14 @@ example (x y : U) : x = y := by
 example (latestPlan otherPlan : Fin 4) (guard : Bool) (enabled : Fin 4 → Bool) :
     enabled latestPlan = guard ∧ latestPlan = otherPlan := by
   guard_typed_sat_model
+
+/-- warning: declaration uses `sorry` -/
+#guard_msgs in
+example (EnactorPC : Type)
+    (Receive Apply Cleanup RemoveActiveDNS : EnactorPC)
+    (_EnactorPC_Enum_distinct : distinctN [Receive, Apply, Cleanup, RemoveActiveDNS])
+    (x : Fin 5) : x = 0 := by
+  guard_raw_sat_model
 
 theorem AWSDnsRace_EnactorApply_DnsConsistent_extracted_1_5 (Enactor EnactorPC PlanId : Type) [LT PlanId] (NoPlan : PlanId) (self : Enactor)
   (st_dns_valid : Bool) (hinv : st_dns_valid = true) (st_plan_deleted : PlanId → Bool)
