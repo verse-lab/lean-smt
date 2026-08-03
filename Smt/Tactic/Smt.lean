@@ -123,6 +123,12 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     trace[smt.solve] "\nunknown reason:\n{r}\n"
     return .unknown r.toString
   | .ok (.unsat pf uc) =>
+    if cfg.trust then
+      -- 6. Trust the result by admitting original goal.
+      -- We make this a non-synthetic `sorry` because morally it is requested
+      -- by the user rather than showing a tactic failure.
+      mv.admit (synthetic := false)
+      return .unsat [] hs
     -- 5.c Reconstruct unsat core proofs.
     let ctx := { userNames := fvNames₂, native := cfg.native }
     let (uc, _) ← (uc.mapM Reconstruct.reconstructTerm).run ctx {}
@@ -132,10 +138,6 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     let uc := uc.filterMap fun p => (hs₁[p]?)
     let uc := uc.filterMap (map[·]?)
     let uc := hs.filter uc.flatten.contains
-    if cfg.trust then
-      -- 6. Trust the result by admitting original goal.
-      mv.admit true
-      return .unsat [] uc
     -- 7. Reconstruct proof.
     let some pf := pf | throwError "failed to reconstruct proof for unsat result"
     let (_, ps, p, hp, mvs) ← reconstructProof pf ctx
