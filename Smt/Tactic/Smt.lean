@@ -66,8 +66,43 @@ structure Config where
   extraSolverOptions : List (String × String) := []
 deriving Inhabited, Repr
 
+/-- The elaboration context in which expressions stored in an SMT model are meaningful. -/
+structure ModelContext where
+  ci : Elab.ContextInfo
+  lctx : LocalContext
+  linsts : LocalInstances
+deriving TypeName
+
+/-- Save the current elaboration and local contexts for later model processing. -/
+def ModelContext.save : MetaM ModelContext :=
+  return {
+    ci := { ← CommandContextInfo.save with }
+    lctx := ← getLCtx
+    linsts := ← Meta.getLocalInstances
+  }
+
+/-- Run a metaprogram using the elaboration and local contexts saved with an SMT model. -/
+def ModelContext.runMetaM (ctx : ModelContext) (x : MetaM α) : IO α :=
+  ctx.ci.runMetaM {} <| Meta.withLCtx ctx.lctx ctx.linsts x
+
+/-- A reconstructed SMT model together with the context required to process its expressions. -/
+structure Model where
+  /-- Context information for free variables occurring in the model. -/
+  ctx : ModelContext
+  /-- Interpretations of uninterpreted sorts, represented as pairs of sorts and finite types. -/
+  sorts : Array (Expr × Expr)
+  /-- Interpretations of constants and functions. -/
+  values : Array (Expr × Expr)
+
+/-- All model interpretations in the legacy order: sorts followed by values. -/
+def Model.entries (model : Model) : Array (Expr × Expr) :=
+  model.sorts ++ model.values
+
+def Model.isEmpty (model : Model) : Bool :=
+  model.sorts.isEmpty && model.values.isEmpty
+
 inductive Result where
-  | sat (model : Option (Array (Expr × Expr)))
+  | sat (model : Option Model)
   | unsat (mvs : List MVarId) (usedHints : Array Expr)
   | unknown (reason : String)
 
@@ -163,7 +198,12 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     let (ufs', state) ← (ufs.mapM Reconstruct.reconstructTerm).run ctx state
     let ufs' := ufs'.map fun uf => (map[uf]?.getD #[uf])[0]?.getD uf
     let (vs', _) ← (vs.mapM Reconstruct.reconstructTerm).run ctx state
-    return .sat (.some (uss'.zip cs' ++ ufs'.zip vs'))
+    let model := {
+      ctx := ← mv₀.withContext ModelContext.save
+      sorts := uss'.zip cs'
+      values := ufs'.zip vs'
+    }
+    return .sat (.some model)
 
 namespace Tactic
 
@@ -311,7 +351,7 @@ def evalSmtCore (cfg : TSyntax ``Parser.Tactic.optConfig) (hs : TSyntax ``smtHin
         throwError "unable to prove goal, either it is false or you need to provide more facts. Could not produce a counter-example. Try introducing variables into the local context to get a counter-example."
       else
         let mut md := m!""
-        for (v, t) in model do
+        for (v, t) in model.entries do
           md := md ++ m!"\n  {v} = {t}"
         throwError "unable to prove goal, either it is false or you need to provide more facts. Here is a potential counter-example:\n{md}"
     | .unsat mvs uc =>
