@@ -106,6 +106,71 @@ inductive Result where
   | unsat (mvs : List MVarId) (usedHints : Array Expr)
   | unknown (reason : String)
 
+/-- An event produced while an `smt` call is running. Events for one call are emitted in this
+order when enabled: `queryString`, `rawResult`, then `result`. An `exception` is the terminal event
+instead of `result` when the call throws. -/
+inductive AsyncOutput where
+  | queryString (query : String)
+  | rawResult (raw : Except cvc5.Error cvc5Result)
+  | result (result : Result)
+  | exception (ex : Exception)
+deriving Inhabited
+
+/-- Configuration and call numbering for the optional asynchronous event stream. -/
+structure AsyncState where
+  /-- User-provided name shared by related calls. -/
+  name : Name := `smt
+  /-- Index assigned to the next call on this stream. -/
+  index : Nat := 0
+  sendQuery : Bool := false
+  sendRawResult : Bool := false
+  sendResult : Bool := true
+  /-- Caller-owned channel. `smt` sends events but never closes it. -/
+  ch : Option (Std.CloseableChannel ((Name × Nat) × AsyncOutput)) := none
+deriving Inhabited
+
+/-- Scoped asynchronous state used by `smt`. With no initialized channel, the tactic behaves as
+before and does not mutate the environment. -/
+initialize asyncState : SimpleScopedEnvExtension AsyncState AsyncState ←
+  registerSimpleScopedEnvExtension {
+    name := `asyncState
+    initial := default
+    addEntry := fun _ state => state
+  }
+
+/-- Initialize an asynchronous SMT event stream. If `ch` is supplied, it remains owned by the
+caller; otherwise a fresh caller-owned channel is returned. Reinitializing resets call indices to
+zero. The defaults match Veil's existing use: only reconstructed results are sent. -/
+def initAsyncState [Monad m] [MonadEnv m] [MonadLiftT BaseIO m]
+    [MonadLiftT (ST IO.RealWorld) m] [MonadFinally m]
+    (name : Name)
+    (ch : Option (Std.CloseableChannel ((Name × Nat) × AsyncOutput)) := none)
+    (sendQuery := false) (sendRawResult := false) (sendResult := true) :
+    m (Std.CloseableChannel ((Name × Nat) × AsyncOutput)) := do
+  let ch ← match ch with
+    | some ch => pure ch
+    | none => Std.CloseableChannel.new
+  Lean.modifyEnv (asyncState.modifyState · fun _ => {
+    name, index := 0, sendQuery, sendRawResult, sendResult, ch := some ch
+  })
+  return ch
+
+private def getAsyncStateAndIncreaseIndex : MetaM AsyncState := do
+  let state := asyncState.getState (← getEnv)
+  if state.ch.isSome then
+    Lean.modifyEnv (asyncState.modifyState · fun _ => { state with index := state.index + 1 })
+  return state
+
+private def AsyncState.send (state : AsyncState) (id : Name × Nat) (output : AsyncOutput) :
+    MetaM Unit :=
+  state.ch.forM fun ch => Std.CloseableChannel.Sync.send ch (id, output)
+
+private def AsyncState.sendException (state : AsyncState) (id : Name × Nat)
+    (ex : Exception) : MetaM Unit := do
+  -- If the caller closed the channel early, preserve the original exception instead of replacing
+  -- it with a channel error.
+  try state.send id (.exception ex) catch _ => pure ()
+
 def genUniqueFVarNames : MetaM (Std.HashMap FVarId String × Std.HashMap String Expr) := do
   let lCtx ← getLCtx
   let st : NameSanitizerState := { options := {}}
@@ -119,6 +184,13 @@ def prepareSmtQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : Met
   Query.generateQuery hs fvNames
 
 def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
+  let asyncState ← getAsyncStateAndIncreaseIndex
+  let asyncId := (asyncState.name, asyncState.index)
+  let finish (result : Result) : MetaM Result := do
+    if asyncState.sendResult then
+      asyncState.send asyncId (.result result)
+    return result
+  try
   -- 0. Create a duplicate goal to preserve the original goal.
   let goalType : Q(Prop) ← mv.getType
   let mv₀ := (← Meta.mkFreshExprMVar (← mv.getType)).mvarId!
@@ -137,17 +209,22 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let (fvNames₁, fvNames₂) ← genUniqueFVarNames
   let cmds ← prepareSmtQuery hs₁.toList fvNames₁
   let cmds := .setLogic "ALL" :: cmds
+  let query := Command.cmdsAsQuery (cmds ++ [.checkSat])
+  if asyncState.sendQuery then
+    asyncState.send asyncId (.queryString query)
   if cfg.showQuery then
-    mv.withContext do logInfo m!"goal: {goalType}\n\nquery:\n{Command.cmdsAsQuery (cmds ++ [.checkSat])}"
+    mv.withContext do logInfo m!"goal: {goalType}\n\nquery:\n{query}"
     -- Return original goal.
-    return .unsat [mv] hs₁
+    return ← finish (.unsat [mv] hs₁)
   else
     mv.withContext do trace[smt] "goal: {goalType}"
-    trace[smt] "\nquery:\n{Command.cmdsAsQuery (cmds ++ [.checkSat])}"
+    trace[smt] "\nquery:\n{query}"
   -- 4. Run the solver.
   let options := defaultSolverOptions ++ (if cfg.trust then [] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
   let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!cfg.trust) options
   -- trace[smt] "\nresult: {res}"
+  if asyncState.sendRawResult then
+    asyncState.send asyncId (.rawResult res)
   match res with
   | .error e =>
     -- 5a. Print error reason.
@@ -156,14 +233,14 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   | .ok (.unknown r) =>
     -- 5b. Print unknown reason.
     trace[smt.solve] "\nunknown reason:\n{r}\n"
-    return .unknown r.toString
+    finish (.unknown r.toString)
   | .ok (.unsat pf uc) =>
     if cfg.trust then
       -- 6. Trust the result by admitting original goal.
       -- We make this a non-synthetic `sorry` because morally it is requested
       -- by the user rather than showing a tactic failure.
       mv.admit (synthetic := false)
-      return .unsat [] hs
+      return ← finish (.unsat [] hs)
     -- 5.c Reconstruct unsat core proofs.
     let ctx := { userNames := fvNames₂, native := cfg.native }
     let (uc, _) ← (uc.mapM Reconstruct.reconstructTerm).run ctx {}
@@ -181,11 +258,11 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     let gs ← mv₃.apply (← Meta.mkAppOptM ``Prop.implies_false_of_not_and #[listExpr ps q(Prop)])
     mv₃.withContext (gs.forM (·.assumption))
     mv.assign (.mvar mv₀)
-    return .unsat mvs uc
+    finish (.unsat mvs uc)
   | .ok (.sat model) =>
     -- 5d. Return potential counter-example.
     if !cfg.model then
-      return .sat none
+      return ← finish (.sat none)
     let (uss, es) := model.iss.unzip
     let cs := es.map Array.size
     let sortCard := Std.HashMap.insertMany ∅ (uss.zip cs)
@@ -203,7 +280,10 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
       sorts := uss'.zip cs'
       values := ufs'.zip vs'
     }
-    return .sat (.some model)
+    finish (.sat (.some model))
+  catch ex =>
+    asyncState.sendException asyncId ex
+    throw ex
 
 namespace Tactic
 
