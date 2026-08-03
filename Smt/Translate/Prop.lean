@@ -9,6 +9,8 @@ module
 
 public import Smt.Recognizers
 public meta import Smt.Recognizers
+public import Smt.Reconstruct.Prop.Core
+public meta import Smt.Reconstruct.Prop.Core
 public import Smt.Translate
 public meta import Smt.Translate
 
@@ -25,6 +27,20 @@ private def mkProp : Lean.Expr :=
 private def mkBool : Lean.Expr :=
   toTypeExpr Bool
 
+private partial def listLitWithLets? (e : Lean.Expr) : Option (Lean.Expr × List Lean.Expr) :=
+  go e #[]
+where
+  go (e : Lean.Expr) (acc : Array Lean.Expr) : Option (Lean.Expr × List Lean.Expr) :=
+    let e := e.consumeMData
+    match e with
+    | .letE _ _ val body _ => go (body.instantiate1 val) acc
+    | .app (.app (.app (.const ``List.cons _) _) x) xs => go xs (acc.push x)
+    | .app (.const ``List.nil _) α => some (α, acc.toList)
+    | _ =>
+      match e.listLit? with
+      | some (α, xs) => some (α, acc.toList ++ xs)
+      | none => none
+
 @[smt_translate] def translateType : Translator := fun e => match e with
   | .sort 0        => return symbolT "Bool"
   | _              => return none
@@ -34,6 +50,14 @@ private def mkBool : Lean.Expr :=
     return symbolT "true"
   else if let .const ``False _ := e then
     return symbolT "false"
+  else if e.isAppOfArity' ``distinctN 2 then
+    -- Large list literals elaborate with `let` chunks. Traverse those chunks
+    -- so `distinctN [a₀, ..., aₙ]` remains one SMT-LIB `distinct` term.
+    let some (_, xs) := listLitWithLets? e.appArg! | return none
+    if xs.length < 2 then
+      return symbolT "true"
+    else
+      return Term.mkAppN (symbolT "distinct") (← xs.mapM applyTranslators!)
   else if let some p := e.not? then
     return appT (symbolT "not") (← applyTranslators! p)
   else if let some (p, q) := e.and? then

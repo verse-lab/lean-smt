@@ -299,6 +299,158 @@ def reconstructChainResolution (cs as : Array cvc5.Term) (ps : Array Expr) : Rec
     cc := getResolutionResult cc (clausify cs[i]! l) pol l
   return cp
 
+-- Find the two positions in the original n-ary `distinct` argument list that
+-- correspond to cvc5's selected disequality. Positions matter here: if the
+-- same expression occurs twice, the second lookup must skip the first index.
+private def findDistinctPairIndexes? (x y : Expr) (xs : Array Expr) :
+    ReconstructM (Option (Nat × Nat)) := do
+  let some i ← findIndex? x | return none
+  let some j ← findIndex? y (skip := some i) | return none
+  return some (i, j)
+where
+  findIndex? (needle : Expr) (skip : Option Nat := none) : ReconstructM (Option Nat) := do
+    for i in [:xs.size] do
+      unless skip == some i do
+        if ← Meta.isDefEq needle xs[i]! then
+          return some i
+    return none
+
+-- `distinct-elim` often appears behind `EQ_RESOLVE` or unary administrative
+-- proof nodes. Follow those nodes to the original n-ary `DISTINCT` source.
+private partial def distinctSourceOfProof? (pf : cvc5.Proof) : Option cvc5.Proof :=
+  if pf.getResult.getKind! == .DISTINCT then
+    some pf
+  else if pf.getRule == .EQ_RESOLVE then
+    distinctSourceOfProof? pf.getChildren[0]!
+  else if pf.getChildren.size == 1 then
+    distinctSourceOfProof? pf.getChildren[0]!
+  else
+    none
+
+private def distinctNListArg? (e : Expr) : Option Expr :=
+  let e := e.consumeMData
+  match e.getAppFn with
+  | .const ``distinctN _ => e.getAppArgs.back?
+  | _ => none
+
+private def findDistinctAssumWithType? (target : Expr) : ReconstructM (Option Expr) := do
+  -- Large source list literals retain let-chunk structure in the local
+  -- hypothesis, while reconstructing SMT `distinct` produces a direct cons
+  -- spine. They are definitionally equal but not structurally identical.
+  for a in (← get).currAssums.reverse do
+    let type ← a.fvarId!.getType
+    if (distinctNListArg? type).isSome && (← Meta.isDefEq type target) then
+      return some a
+  return none
+
+private def selectedDistinctPair? (target : Expr) (term : cvc5.Term) :
+    ReconstructM (Option (Expr × Expr)) := do
+  if let some (xTerm, yTerm) := termPair? term then
+    let x ← reconstructTerm xTerm
+    let y ← reconstructTerm yTerm
+    return some (x, y)
+  let some pair := exprPair? (← Meta.reduce target) | return none
+  return some pair
+where
+  exprPair? (e : Expr) : Option (Expr × Expr) := do
+    let_expr Not p := e.consumeMData | none
+    let_expr Eq _ x y := p.consumeMData | none
+    return (x, y)
+
+  termPair? (t : cvc5.Term) : Option (cvc5.Term × cvc5.Term) :=
+    if t.getKind! == .DISTINCT && t.getNumChildren == 2 then
+      some (t[0]!, t[1]!)
+    else if t.getKind! == .NOT && t.getNumChildren == 1 then
+      let eq := t[0]!
+      if eq.getKind! == .EQUAL && eq.getNumChildren == 2 then
+        some (eq[0]!, eq[1]!)
+      else
+        none
+    else
+      none
+
+/- Context for reconstructing a selected piece of cvc5's `distinct` expansion.
+
+cvc5 proves facts from `(distinct a₀ ... aₙ)` by expanding it to all
+pairwise disequalities and then selecting a leaf or subtree with `.AND_ELIM`.
+For large lists, reconstructing that whole conjunction creates a quadratic
+proof term and can hit kernel recursion limits. Instead, retain the compact
+`distinctN` proof and prove only the selected pair(s) by list index. -/
+private structure DistinctElimContext where
+  u : Level
+  α : Q(Type u)
+  xsList : Q(List $α)
+  hDistinct : Q(distinctN $xsList)
+  distinctArgs : Array Q($α)
+
+private def distinctElimContext? (distinctPf : cvc5.Proof) :
+    ReconstructM (Option DistinctElimContext) := do
+  let distinctTerm := distinctPf.getResult
+  if distinctTerm.getNumChildren == 0 then
+    return none
+
+  let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort distinctTerm[0]!.getSort!
+  let u ← Meta.decLevel u
+  let α : Q(Type $u) ← pure α
+  let distinctArgs : Array Q($α) ← distinctTerm.getChildren.mapM reconstructTerm
+  let reconstructedType ← reconstructTerm distinctTerm
+  let hDistinctExpr ← match ← findDistinctAssumWithType? reconstructedType with
+    | some h => pure h
+    | none => reconstructProof distinctPf
+  let some xsListExpr := distinctNListArg? (← Meta.inferType hDistinctExpr) | return none
+  let xsList : Q(List $α) ← pure xsListExpr
+  let hDistinct : Q(distinctN $xsList) ← pure hDistinctExpr
+  return some { u, α, xsList, hDistinct, distinctArgs }
+
+private def proveDistinctPairByIndex? (ctx : DistinctElimContext) (x y : Expr) :
+    ReconstructM (Option Expr) := do
+  let { α, xsList, hDistinct, distinctArgs, .. } := ctx
+  unless ← Meta.isDefEq (← Meta.inferType x) α do
+    return none
+  unless ← Meta.isDefEq (← Meta.inferType y) α do
+    return none
+  let some (i, j) ← findDistinctPairIndexes? x y distinctArgs | return none
+
+  -- These side conditions are closed numerals over the literal list, so
+  -- `of_decide_eq_true` discharges them by computation.
+  let hi : Q($i < «$xsList».length) :=
+    .app q(@of_decide_eq_true ($i < «$xsList».length) _) q(Eq.refl true)
+  let hj : Q($j < «$xsList».length) :=
+    .app q(@of_decide_eq_true ($j < «$xsList».length) _) q(Eq.refl true)
+  let hij : Q($i ≠ $j) :=
+    .app q(@of_decide_eq_true ($i ≠ $j) _) q(Eq.refl true)
+  return some q(@distinctN_getElem_ne $α $xsList $hDistinct $i $j $hi $hj $hij)
+
+private partial def proveDistinctSelection? (ctx : DistinctElimContext) (target : Expr)
+    (andTerms : Array cvc5.Term) : ReconstructM (Option Expr) := do
+  if andTerms.isEmpty then
+    return none
+  else if andTerms.size == 1 then
+    let some (x, y) ← selectedDistinctPair? target andTerms[0]! | return none
+    proveDistinctPairByIndex? ctx x y
+  else
+    -- `reconstructProp` turns cvc5 `AND` children into a right-associated Lean
+    -- chain. Mirror that shape while proving only the selected subtree.
+    let target := target.consumeMData
+    let_expr And p q := target | return none
+    let some hp ←
+      proveDistinctSelection? ctx p (nary .AND andTerms[0]!)
+      | return none
+    let some hq ←
+      proveDistinctSelection? ctx q andTerms[1:andTerms.size]
+      | return none
+    return some (← Meta.mkAppM ``And.intro #[hp, hq])
+
+private def reconstructDistinctAndElim? (pf : cvc5.Proof) : ReconstructM (Option Expr) := do
+  let premise := pf.getChildren[0]!
+  let some distinctPf := distinctSourceOfProof? premise | return none
+  let some ctx ← distinctElimContext? distinctPf | return none
+  let target ← reconstructTerm pf.getResult
+  let some proof ←
+    proveDistinctSelection? ctx target (nary .AND pf.getResult)
+    | return none
+  addThm target proof
+
 @[smt_proof_reconstruct] def reconstructPropProof : ProofReconstructor := fun pf => do match pf.getRule with
   | .DSL_REWRITE => reconstructRewrite pf
   | .ITE_EQ =>
@@ -360,6 +512,8 @@ def reconstructChainResolution (cs as : Array cvc5.Term) (ps : Array Expr) : Rec
     let hnp : Q(¬$p) ← reconstructProof pf.getChildren[1]!
     addThm q(False) q(Prop.contradiction $hp $hnp)
   | .AND_ELIM =>
+    if let some h ← reconstructDistinctAndElim? pf then
+      return h
     let f t ps := do
       let p : Q(Prop) ← reconstructTerm t
       return q($p :: $ps)
