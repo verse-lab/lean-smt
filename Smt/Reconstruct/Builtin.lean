@@ -50,7 +50,11 @@ def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
       let c ← getConstInfo n.toName
       return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
 
-def buildDistinct (u : Level) (α : Q(Sort u)) (xs : List Q($α)) : Q(Prop) :=
+def buildDistinctN {u : Level} (α : Q(Type u)) (xs : List Q($α)) : MetaM Q(Prop) := do
+  let xs : Q(List $α) ← Meta.mkListLit α xs
+  return q(distinctN $xs)
+
+def buildDistinctSort (u : Level) (α : Q(Sort u)) (xs : List Q($α)) : Q(Prop) :=
   go xs
 where
   go : List Q($α) → Q(Prop)
@@ -68,9 +72,20 @@ where
     let y : Q($α) ← reconstructTerm t[1]!
     return q($x = $y)
   | .DISTINCT =>
-    let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort t[0]!.getSort!
-    let xs ← t.getChildren.mapM reconstructTerm
-    return buildDistinct u α xs.toList
+    let (sortLevel, α) ← reconstructSortLevelAndSort t[0]!.getSort!
+    try
+      -- `distinctN` is intentionally restricted to `Type`. Use it whenever
+      -- the reconstructed element sort is known to be one universe higher.
+      let u ← Meta.decLevel sortLevel
+      let α : Q(Type $u) ← pure α
+      let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
+      buildDistinctN α xs.toList
+    catch _ =>
+      -- Preserve the previous reconstruction for genuinely sort-polymorphic
+      -- terms, whose universe level cannot be decremented safely.
+      let α : Q(Sort $sortLevel) ← pure α
+      let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
+      return buildDistinctSort sortLevel α xs.toList
   | .ITE =>
     let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort t.getSort!
     let c : Q(Prop) ← reconstructTerm t[0]!
