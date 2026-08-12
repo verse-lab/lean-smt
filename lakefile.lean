@@ -17,7 +17,8 @@ require quote4 from git "https://github.com/leanprover-community/quote4"
 package smt
 
 @[default_target]
-lean_lib Smt
+lean_lib Smt where
+  precompileModules := true
 
 lean_lib SmtTest where
   globs := #[Glob.submodules `Test]

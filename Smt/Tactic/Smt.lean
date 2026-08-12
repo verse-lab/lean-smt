@@ -53,6 +53,10 @@ structure Config where
   normalize : Bool := true
   /-- Whether to embed subtypes (e.g., `Nat`, `Bool`, `Rat`) into types understood by the SMT solver. -/
   embeddings : Bool := true
+  /-- Whether to embed `Bool` values into `Prop`. Only takes effect when `embeddings` is enabled.
+      **Warning**: disabling this can make proof reconstruction or unsat-core extraction fail, so it
+      is currently only recommended together with `trust`. -/
+  embedBool : Bool := true
   /-- Whether to trust the result of the SMT solver. Closes the current goal with a `sorry` if the
       SMT solver returns `unsat`. **Warning**: use with caution, as this may lead to unsoundness.
       Additionally adds the translation from Lean to SMT to the trusted code base, which is not
@@ -202,7 +206,11 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let steps := if cfg.mono then #[Preprocess.mono] else #[Preprocess.pushHintsToCtx] ++
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
   let steps := if cfg.normalize then steps.push Preprocess.normalize else steps
-  let steps := if cfg.embeddings then steps.push Preprocess.embedding else steps
+  let steps :=
+    if cfg.embeddings then
+      steps.push <| Preprocess.embeddingWithConfig { embedBool := cfg.embedBool }
+    else
+      steps
   let ⟨map, hs₁, mv₁⟩ ← Preprocess.applySteps mv₀ hs steps
   mv₁.withContext do
   -- 3. Generate the SMT query.
