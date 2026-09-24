@@ -58,6 +58,10 @@ theorem sum_ub₈ (h₁ : a = b) (h₂ : c ≤ d) : a + c ≤ b + d := by
 theorem sum_ub₉ (h₁ : a = b) (h₂ : c = d) : a + c = b + d := by
   rw [h₁, h₂]
 
+/-- The conclusion of `ARITH_SUM_UB` when every premise is an equality: cvc5 concludes `≤`. -/
+theorem sum_ub_le_of_eq (h : a = b) : a ≤ b := by
+  exact le_of_eq h
+
 theorem mul_abs₁ (h₁ : |x₁| = |y₁|) (h₂ : |x₂| = |y₂|) : |x₁ * x₂| = |y₁ * y₂| := by
   rw [abs_mul x₁ x₂, abs_mul y₁ y₂, h₁, h₂]
 
