@@ -205,6 +205,10 @@ theorem sum_ub₈ (h₁ : a = b) (h₂ : c ≤ d) : a + c ≤ b + d := by
 theorem sum_ub₉ (h₁ : a = b) (h₂ : c = d) : a + c = b + d := by
   rw [h₁, h₂]
 
+/-- The conclusion of `ARITH_SUM_UB` when every premise is an equality: cvc5 concludes `≤`. -/
+theorem sum_ub_le_of_eq (h : a = b) : a ≤ b := by
+  rw [h]; exact Rat.le_refl
+
 theorem trichotomy₁ (h₁ : a ≤ b) (h₂ : a ≠ b) : a < b := by
   refine Rat.not_le.mp ?_
   intro abs
