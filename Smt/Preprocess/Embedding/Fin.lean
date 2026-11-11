@@ -208,4 +208,84 @@ theorem forall_fin_in_as_int₅ {n : Nat} [NeZero n] {p : (α₁ → α₂ → �
     have hf := h (fun a₁ a₂ a₃ a₄ b => f a₁ a₂ a₃ a₄ (ofIntFinTotal n b))
     simpa [ofIntFinTotal_of_fin] using hf
 
+/-- Extends `f : Fin n → β` to all integers, with `default` outside `0 ≤ b < n`. -/
+def extFin {n : Nat} {β : Type _} [Inhabited β] (f : Fin n → β) (b : Int) : β :=
+  if hb : 0 ≤ b ∧ b < n then f (ofIntFin n b hb) else default
+
+theorem extFin_cast {n : Nat} {β : Type _} [Inhabited β] (f : Fin n → β) (a : Fin n) :
+    extFin f ((a : Nat) : Int) = f a := by
+  have hb : 0 ≤ ((a : Nat) : Int) ∧ ((a : Nat) : Int) < n :=
+    ⟨Int.natCast_nonneg a.val, Int.ofNat_lt.mpr a.isLt⟩
+  unfold extFin
+  split
+  · exact congrArg f (ofIntFin_of_fin a _)
+  · rename_i hn
+    exact absurd hb hn
+
+-- The rules below rewrite a function over `Fin n` for a symbolic `n` (where no `NeZero n` instance
+-- exists) into a function over `Int`. They need the result type to be inhabited instead, because the
+-- extension outside `0 ≤ b < n` needs a default value. Without them an `ofIntFin n x h` application
+-- stays behind, and its proof argument `h` cannot be transported when `n` is itself rewritten under
+-- the nonnegativity hypothesis of the `Nat` embedding.
+
+@[embedding ↓]
+theorem forall_fin_in_as_int_inh₁ {n : Nat} {α₁ : Type _} [Inhabited α₁] {p : (Fin n → α₁) → Prop} :
+    (∀ f : Fin n → α₁, p f) ↔
+    (∀ f : Int → α₁, p (fun a => f ((a : Nat) : Int))) := by
+  constructor
+  · intro h f
+    exact h (fun a => f ((a : Nat) : Int))
+  · intro h f
+    have hf := h (extFin f)
+    simpa [extFin_cast] using hf
+
+@[embedding ↓]
+theorem forall_fin_in_as_int_inh₂ {n : Nat} {α₁ α₂ : Type _} [Inhabited α₂]
+    {p : (α₁ → Fin n → α₂) → Prop} :
+    (∀ f : α₁ → Fin n → α₂, p f) ↔
+    (∀ f : α₁ → Int → α₂, p (fun a₁ a => f a₁ ((a : Nat) : Int))) := by
+  constructor
+  · intro h f
+    exact h (fun a₁ a => f a₁ ((a : Nat) : Int))
+  · intro h f
+    have hf := h (fun a₁ => extFin (f a₁))
+    simpa [extFin_cast] using hf
+
+@[embedding ↓]
+theorem forall_fin_in_as_int_inh₃ {n : Nat} {α₁ α₂ α₃ : Type _} [Inhabited α₃]
+    {p : (α₁ → α₂ → Fin n → α₃) → Prop} :
+    (∀ f : α₁ → α₂ → Fin n → α₃, p f) ↔
+    (∀ f : α₁ → α₂ → Int → α₃, p (fun a₁ a₂ a => f a₁ a₂ ((a : Nat) : Int))) := by
+  constructor
+  · intro h f
+    exact h (fun a₁ a₂ a => f a₁ a₂ ((a : Nat) : Int))
+  · intro h f
+    have hf := h (fun a₁ a₂ => extFin (f a₁ a₂))
+    simpa [extFin_cast] using hf
+
+@[embedding ↓]
+theorem forall_fin_in_as_int_inh₄ {n : Nat} {α₁ α₂ α₃ α₄ : Type _} [Inhabited α₄]
+    {p : (α₁ → α₂ → α₃ → Fin n → α₄) → Prop} :
+    (∀ f : α₁ → α₂ → α₃ → Fin n → α₄, p f) ↔
+    (∀ f : α₁ → α₂ → α₃ → Int → α₄, p (fun a₁ a₂ a₃ a => f a₁ a₂ a₃ ((a : Nat) : Int))) := by
+  constructor
+  · intro h f
+    exact h (fun a₁ a₂ a₃ a => f a₁ a₂ a₃ ((a : Nat) : Int))
+  · intro h f
+    have hf := h (fun a₁ a₂ a₃ => extFin (f a₁ a₂ a₃))
+    simpa [extFin_cast] using hf
+
+@[embedding ↓]
+theorem forall_fin_in_as_int_inh₅ {n : Nat} {α₁ α₂ α₃ α₄ α₅ : Type _} [Inhabited α₅]
+    {p : (α₁ → α₂ → α₃ → α₄ → Fin n → α₅) → Prop} :
+    (∀ f : α₁ → α₂ → α₃ → α₄ → Fin n → α₅, p f) ↔
+    (∀ f : α₁ → α₂ → α₃ → α₄ → Int → α₅,
+      p (fun a₁ a₂ a₃ a₄ a => f a₁ a₂ a₃ a₄ ((a : Nat) : Int))) := by
+  constructor
+  · intro h f
+    exact h (fun a₁ a₂ a₃ a₄ a => f a₁ a₂ a₃ a₄ ((a : Nat) : Int))
+  · intro h f
+    have hf := h (fun a₁ a₂ a₃ a₄ => extFin (f a₁ a₂ a₃ a₄))
+    simpa [extFin_cast] using hf
+
 end Smt.Preprocess.Embedding
