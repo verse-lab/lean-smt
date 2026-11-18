@@ -199,7 +199,12 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let goalType : Q(Prop) ← mv.getType
   let mv₀ := (← Meta.mkFreshExprMVar (← mv.getType)).mvarId!
   -- 1. Cleanup goal.
-  let mv₀ ← mv₀.cleanup (← hs.foldlM (fun s h => return (← (Expr.collectFVars h).run s).snd) {}).fvarIds
+  let hints ← hs.foldlM (fun s h => return (← (Expr.collectFVars h).run s).snd) {}
+  -- Inhabitation evidence can be needed for translating or reconstructing quantifiers even
+  -- when it does not appear in the Lean target or hints.
+  let inhabitation := (← Meta.getLocalInstances).filterMap fun inst =>
+    if inst.className == ``Nonempty || inst.className == ``Inhabited then some inst.fvar.fvarId! else none
+  let mv₀ ← mv₀.cleanup (hints.fvarIds ++ inhabitation)
   trace[smt.preprocess] "after cleanup: {mv₀}"
   mv₀.withContext do
   -- 2. Preprocess the hints and goal.

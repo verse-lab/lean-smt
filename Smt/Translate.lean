@@ -36,6 +36,8 @@ namespace Smt
 open Lean Meta Expr
 open Attribute Term
 
+/-- Translation state and its cache belong to one root Lean context. Start with a fresh state
+when translating in another root context. -/
 structure TranslationM.State where
   /-- Constants that the translated result depends on. We propagate these upwards during translation
   in order to build a dependency graph. The value is reset at the `translateExpr` entry point. -/
@@ -53,6 +55,9 @@ structure TranslationM.State where
   scopedNames : Std.HashMap Name Nat := {}
   /-- A mapping from fvars to unique names. -/
   uniqueFVarNames : Std.HashMap FVarId String := {}
+  /-- Instances available before translation introduces temporary local declarations.
+  Direct calls capture them on first use. -/
+  goalInstances : Option LocalInstances := none
 
 abbrev TranslationM := StateT TranslationM.State MetaM
 
@@ -131,6 +136,9 @@ expression and if one succeeds, its result is returned. Otherwise, `e` is split 
 which are then recursively translated and put together into an SMT-LIB term. The traversal proceeds
 in a top-down, depth-first order. -/
 partial def applyTranslators? : Translator := withCache fun e => do
+  if (← get).goalInstances.isNone then
+    let goalInstances ← Meta.getLocalInstances
+    modify fun st => { st with goalInstances := some goalInstances }
   let ts ← getTranslators
   go ts e
   where
@@ -160,9 +168,18 @@ partial def applyTranslators? : Translator := withCache fun e => do
       | forallE n t b bi => withScopedName n b fun n => do
         let tmB ← Meta.withLocalDecl n bi t (translateBody b)
         if !b.hasLooseBVars /- not a dependent arrow -/ then
-          return arrowT (← applyTranslators! t) tmB
-        else
-          return forallT n.toString (← applyTranslators! t) tmB
+          unless (← Meta.isProp e) && !(← Meta.isProp t) do
+            return arrowT (← applyTranslators! t) tmB
+          -- Cached translations can be reused outside the scope of enclosing solver binders.
+          let nonempty ← Meta.mkAppM ``Nonempty #[t]
+          let goalInstances := (← get).goalInstances.getD #[]
+          let evidence ← Meta.withLCtx (← getLCtx) goalInstances (Meta.synthInstance? nonempty)
+          unless evidence.isSome do
+            throwError "cannot translate a potentially empty sort {t} to SMT-LIB\n\
+              Lean could not prove {nonempty} in the goal context. SMT-LIB sorts are nonempty.\n\
+              If you have a witness `x`, add `haveI : Nonempty _ := ⟨x⟩` before `smt`.\n\
+              If the instance is derivable before preprocessing, declare it with `haveI` before `smt`."
+        return forallT n.toString (← applyTranslators! t) tmB
       | letE n t v b true =>
         let tmB ← Meta.withLetDecl n t v (translateBody b)
         return letT n.toString (← applyTranslators! v) tmB
