@@ -56,7 +56,7 @@ def hasReturnType (e : Expr) (p : Expr → Bool) : Bool :=
 def embeddingWithConfig (cfg : EmbeddingConfig) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
   -- Find all free vars to revert in `hs` and `mv`.
   let ts ← hs.mapM Meta.inferType
-  let ⟨_, _, fvs⟩ := (ts.push (← mv.getType)).foldl Lean.collectFVars {}
+  let fvs := ((ts.push (← mv.getType)).foldl Lean.collectFVars {}).fvarIds
   let fvs ← Meta.sortFVarIds fvs
   -- Check if we need to do anything.
   let bts ← cfg.baseTypes
