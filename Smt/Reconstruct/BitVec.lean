@@ -75,6 +75,45 @@ where
       curr := mkApp2 op (← reconstructTerm ct) curr
     return currInst
 
+private def bitVecIndex? (t : cvc5.Term) : Option Nat := do
+  guard (t.getKind! == .CONST_INTEGER)
+  let n := t.getIntegerValue!
+  guard (n ≥ 0)
+  return n.toNat
+
+private def reconstructInternalBitVec (t : cvc5.Term) : ReconstructM (Option Expr) := do
+  -- cvc5 1.3.2 leaves instantiated indexed RARE operators in symbolic form.
+  let name := (t.toString.drop 1 |>.takeWhile (· != ' ')).toString
+  match name, t.getChildren with
+  | "@bv", #[n, _] =>
+    let w : Nat := t.getSort!.getBitVectorSize!.toNat
+    if let some n := bitVecIndex? n then
+      return q(BitVec.ofNat $w $n)
+    let n : Q(Int) ← reconstructTerm n
+    return q(BitVec.ofInt $w $n)
+  | "@bvsize", #[x] =>
+    let w : Nat := x.getSort!.getBitVectorSize!.toNat
+    return toExpr (Int.ofNat w)
+  | "extract", #[hi, lo, x] =>
+    let some hi := bitVecIndex? hi | return none
+    let some lo := bitVecIndex? lo | return none
+    let w : Nat := x.getSort!.getBitVectorSize!.toNat
+    let x : Q(BitVec $w) ← reconstructTerm x
+    return q(«$x».extractLsb $hi $lo)
+  | name, #[idx, x] =>
+    let some idx := bitVecIndex? idx | return none
+    unless x.getSort!.getKind! == .BITVECTOR_SORT do return none
+    let w : Nat := x.getSort!.getBitVectorSize!.toNat
+    let x : Q(BitVec $w) ← reconstructTerm x
+    match name with
+    | "zero_extend" => return q(«$x».zeroExtend ($w + $idx))
+    | "sign_extend" => return q(«$x».signExtend ($w + $idx))
+    | "rotate_left" => return q(«$x».rotateLeft $idx)
+    | "rotate_right" => return q(«$x».rotateRight $idx)
+    | "repeat" => return q(«$x».replicate $idx)
+    | _ => return none
+  | _, _ => return none
+
 @[smt_term_reconstruct] def reconstructBitVec : TermReconstructor := fun t => do match t.getKind! with
   | .CONST_BITVECTOR =>
     let w : Nat := t.getSort!.getBitVectorSize!.toNat
@@ -323,17 +362,7 @@ where
     let w : Nat ← pure t[0]!.getSort!.getBitVectorSize!.toNat
     let x : Q(BitVec $w) ← reconstructTerm t[0]!
     return q(BitVec.negOverflow $x = true)
-  | .INTERNAL_KIND =>
-    -- Instances of RARE rules contain symbolic constants `(@bv n w)` of value `n` and width `w`,
-    -- which cvc5 evaluates in separate steps. Their kind is internal to cvc5, so they are
-    -- recognized by name.
-    unless t.toString.startsWith "(@bv " do return none
-    let w : Nat := t.getSort!.getBitVectorSize!.toNat
-    if t[0]!.getKind! == .CONST_INTEGER && t[0]!.getIntegerValue! ≥ 0 then
-      let n : Nat := t[0]!.getIntegerValue!.toNat
-      return q(BitVec.ofNat $w $n)
-    let n : Q(Int) ← reconstructTerm t[0]!
-    return q(BitVec.ofInt $w $n)
+  | .INTERNAL_KIND => reconstructInternalBitVec t
   | _ => return none
 where
   leftAssocOp (op : Expr) (t : cvc5.Term) : ReconstructM Expr := do
