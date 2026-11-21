@@ -11,7 +11,7 @@ public import Smt.Preprocess.Normalize.Attribute
 
 @[expose] public section
 
-attribute [smt_normalize ↓] Nat.zero_eq Nat.succ_eq_add_one
+attribute [smt_normalize ↓] Nat.zero_eq Nat.succ_eq_add_one Nat.max_def
 
 @[smt_normalize ↓]
 theorem Nat.add_def : Nat.add a b = a + b := rfl
