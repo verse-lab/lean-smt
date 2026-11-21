@@ -41,6 +41,11 @@ theorem intValOfNat (m n : Nat) [NeZero n] :
     (((no_index (OfNat.ofNat m : Fin n)).val : Nat) : Int) = (OfNat.ofNat m : Int) % n :=
   Int.natCast_emod m n
 
+@[fin_embedding ↓]
+theorem intValIte (c : Prop) [Decidable c] (i j : Fin n) :
+    (((if c then i else j).val : Nat) : Int) = if c then (i.val : Int) else (j.val : Int) := by
+  split <;> rfl
+
 theorem fin_bounds {n : Nat} (x : Fin n) : 0 ≤ (x.val : Int) ∧ (x.val : Int) < n :=
   ⟨Int.natCast_nonneg x.val, Int.ofNat_lt.mpr x.isLt⟩
 

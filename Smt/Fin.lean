@@ -9,3 +9,5 @@ module
 
 public import Smt.Preprocess.Embedding.Fin
 public meta import Smt.Preprocess.Embedding.Fin
+public import Smt.Preprocess.Normalize.Fin
+public meta import Smt.Preprocess.Normalize.Fin
