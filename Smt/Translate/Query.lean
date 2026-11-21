@@ -142,6 +142,15 @@ def addDefineCommandFor (nm : String) (e : Expr) (params : Array Expr) (cod : Ex
     addCommand e <| .defineFun nm tmParams tmCod tmVal isRec
     return deps ++ deps'
 
+/-- Unfold sort aliases and inspect function domains and codomains. An unencoded Fin,
+including `Fin 0` inside a function space, cannot be declared as an inhabited SMT sort. -/
+private partial def hasFinSort (type : Expr) : MetaM Bool := do
+  let type ← Meta.whnf type
+  if type.isAppOfArity ``Fin 1 then return true
+  let .forallE name domain body bi := type | return false
+  if ← hasFinSort domain then return true
+  withLocalDecl name bi domain fun x => hasFinSort (body.instantiate1 x)
+
 def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod : Expr)
     : QueryBuilderM (Array Expr) := do
   if cod.isSort && !cod.isProp then
@@ -180,6 +189,8 @@ def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod 
             if allOk then
               addCommand e <| .declareDatatypes [(nm, 0)] [ctorDecls]
               return allDeps
+    if ← hasFinSort (mkAppN e params) then
+      throwError "cannot declare {mkAppN e params} as an uninterpreted SMT sort: it contains Fin"
     addCommand e <| .declareSort nm params.size
     return #[]
   else
