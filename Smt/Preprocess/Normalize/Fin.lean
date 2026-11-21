@@ -13,6 +13,12 @@ attribute [fin_normalize ↓ ←] Fin.val_ne_iff
 attribute [fin_normalize ↓] Fin.val_succ Fin.val_last Fin.val_cast Fin.val_castLE Fin.val_castLT Fin.val_castSucc
 attribute [fin_normalize ↓] Fin.val_mul Fin.val_mod
 
+-- Function-valued state updates give an equality of maps. Expose the bounded index
+-- before the representations of the maps change during embedding.
+@[fin_normalize ↓] theorem finFunEq {f g : Fin n → α} :
+    f = g ↔ ∀ i, f i = g i :=
+  ⟨fun h i => congrFun h i, funext⟩
+
 -- The sum of two indices can wrap at most once. Keeping the resulting constraint
 -- linear lets the arithmetic proof reconstructor handle symbolic bounds.
 @[fin_normalize ↓] theorem finValAdd (i j : Fin n) : (i + j).val =

@@ -101,6 +101,18 @@ def finContext (roots : Array Expr) : MetaM (Bool × Array FVarId) := do
         keep := keep.push decl.fvarId
   return (finite || !keep.isEmpty, keep)
 
+private def addWitness (e : Expr) : StateRefT (Array Meta.Hypothesis) MetaM Unit := do
+  let t ← Meta.inferType e
+  let value ← if t.isAppOfArity ``Nonempty 1 then pure e
+    else if t.isType then
+      let some inst ← Meta.synthInstance? (← Meta.mkAppM ``Nonempty #[e]) | return
+      pure inst
+    else if t.isFVar && (← Meta.inferType t).isType then Meta.mkAppM ``Nonempty.intro #[e]
+    else return
+  let type ← Meta.inferType value
+  unless (← get).any (·.type == type) do
+    modify (·.push { userName := .anonymous, type, value, binderInfo := .instImplicit })
+
 def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
   -- Find all free vars to revert in `hs` and `mv`.
   let ts ← hs.mapM Meta.inferType
@@ -116,20 +128,17 @@ def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM 
     return { map := {}, hs, mv }
   -- Register actual witnesses of abstract argument types before reverting their values.
   -- The instances have type `Nonempty α` and stay available while simplifying under binders.
-  let mut witnesses : Array Meta.Hypothesis := #[]
-  if hasFin then
-    for fv in used.fvarIds do
-      let t ← fv.getType
-      let value ← if t.isAppOfArity ``Nonempty 1 then pure (.fvar fv)
-        else if t.isFVar && (← Meta.inferType t).isType then Meta.mkAppM ``Nonempty.intro #[.fvar fv]
-        else continue
-      let type ← Meta.inferType value
-      unless witnesses.any (·.type == type) do
-        witnesses := witnesses.push { userName := .anonymous, type, value, binderInfo := .instImplicit }
-    for h in hs do
-      let type ← Meta.inferType h
-      if type.isAppOfArity ``Nonempty 1 && !witnesses.any (·.type == type) then
-        witnesses := witnesses.push { userName := .anonymous, type, value := h, binderInfo := .instImplicit }
+  let collect : StateRefT (Array Meta.Hypothesis) MetaM Unit := do
+    if hasFin then
+      for fv in used.fvarIds do addWitness (.fvar fv)
+      for h in hs do addWitness h
+      -- Even when f : Fin n → α is the only field with codomain α, an actual f i
+      -- witnesses α. Applications containing bound variables cannot supply that evidence.
+      if fvts.any Expr.isType then
+        for t in ts.push (← mv.getType) do
+          t.forEach fun e => do
+            if e.isApp && e.getAppFn.isFVar && !e.hasLooseBVars then addWitness e
+  let (_, witnesses) ← collect.run #[]
   let (_, mv) ← mv.assertHypotheses witnesses
   -- Find the embedding simp theorems.
   let some thmsExt ← Meta.getSimpExtension? `embedding | throwError "embedding simp extension not found"
@@ -167,8 +176,7 @@ def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM 
   let (some mv, _) ← Meta.simpTarget mv ctx simpProcs (mayCloseGoal := false) | throwError "[embedding] simplification failed"
   -- SMT sorts are inhabited. Sending a residual `Fin` as an uninterpreted sort could
   -- therefore change the meaning of an unsupported higher-order or dependent signature.
-  if let some fin := (← mv.getType).find? isFin then
-    throwError "[embedding] unsupported occurrence of {fin} after embedding"
+  let residual := (← mv.getType).find? isFin
   -- Extend `fvs` to account for `nonneg` assumptions.
   let bts := bts.pop -- Do not consider `Bool` for assumptions.
   let mut fvs' : Array (Option FVarId) := #[]
@@ -179,7 +187,9 @@ def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM 
     if hasReturnType t ((bts.map (.const · [])).contains ·) || result.any isFin then
       fvs' := fvs'.push none
   -- Re-introduce all free vars (and their `nonneg` assumptions).
-  let (fvs'', mv) ← mv.introNP fvs'.size
+  let (fvs'', mv) ← try mv.introNP fvs'.size catch ex =>
+    if let some fin := residual then throwError "[embedding] unsupported occurrence of {fin} after embedding"
+    throw ex
   -- Compose the final map from new free vars to old ones.
   -- We do not need to map `nonneg` assumptions. Since `nonneg` assumptions are auxiliary,
   -- We can always provide all of them to the SMT solver without affecting the unsat core.
@@ -193,6 +203,20 @@ def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM 
   let hs ← if hasFin then hs.filterM (fun h => do return !(← Meta.inferType h).isAppOfArity ``Nonempty 1)
     else pure hs
   let hs' := hs' ++ hs.map fun h => inverseMap[h]?.getD h
+  if residual.isSome then mv.withContext do
+    -- Reverting a symbolic bound also reverts unused dependent declarations (for
+    -- example representation instances). Only the selected facts and their dependencies
+    -- reach the solver. Check those declarations after restoring the local context.
+    let roots := (← hs'.mapM Meta.inferType) ++ hs'.push (← mv.getType)
+    let used ← (roots.foldl Lean.collectFVars {}).addDependencies
+    let mut terms := roots
+    for fv in used.fvarIds do
+      let decl ← fv.getDecl
+      terms := terms.push decl.type
+      if let some value := decl.value? then terms := terms.push value
+    for term in terms do
+      if let some fin := term.find? isFin then
+        throwError "[embedding] unsupported occurrence of {fin} after embedding"
   let map := (inverse inverseMap).fold (init := {}) fun map k v => map.insert k #[v]
   return { map := map, hs := hs', mv }
 where
