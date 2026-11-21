@@ -159,6 +159,14 @@ def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod 
               match (← getEnv).find? ctorNm with
               | some (.ctorInfo cVal) =>
                 let fields := ctorFieldTypes cVal.numFields cVal.type
+                -- SMT-LIB datatypes cannot express dependent fields (whose types mention earlier
+                -- fields, e.g. `Rat.den_nz : den ≠ 0`) or proof fields, so such types fall back
+                -- to an uninterpreted sort.
+                if fields.length != cVal.numFields ||
+                    (← fields.anyM fun (_, ftype) => do
+                      pure ftype.hasLooseBVars <||> Meta.isProp ftype) then
+                  allOk := false
+                  break
                 let mut fieldDecls : List (String × Term) := []
                 let mut selectorNames : Std.HashSet String := {}
                 let mut idx := 0
