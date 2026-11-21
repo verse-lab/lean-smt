@@ -56,7 +56,8 @@ structure Config where
   /-- Whether to trust the result of the SMT solver. Closes the current goal with a `sorry` if the
       SMT solver returns `unsat`. **Warning**: use with caution, as this may lead to unsoundness.
       Additionally adds the translation from Lean to SMT to the trusted code base, which is not
-      always sound. -/
+      always sound. Queries involving `Fin` and a user-defined SMT sort require proof
+      reconstruction even when this option is enabled. -/
   trust : Bool := false
   /-- Whether to show a potential counter-example when the SMT solver returns `sat`. -/
   model : Bool := false
@@ -120,6 +121,8 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     | .declareSort .. | .defineSort .. | .declareDatatypes .. => true
     | _ => false
   let trust := cfg.trust && !(sourceFin && userSorts)
+  if cfg.trust && !trust then
+    trace[smt] "reconstructing this Fin query because a user-defined SMT sort may be empty in Lean"
   let options := defaultSolverOptions ++ (if trust then [] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
   let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!trust) options
   -- trace[smt] "\nresult: {res}"

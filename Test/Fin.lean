@@ -61,7 +61,7 @@ example (α : Type) (_a : α) (p : Fin 1 → α → Bool) :
 /-- error: [embedding] Fin in this function signature requires support beyond five arguments -/
 #guard_msgs in
 example (n : Nat) (f : Nat → Nat → Nat → Nat → Nat → Nat → Fin n) (a : Nat) :
-    (f a a a a a a).val < n := by smt
+    (f a a a a a a).val + 1 ≤ n := by smt
 
 -- These false statements must be rejected even when trusting the solver's answer.
 example : True := by

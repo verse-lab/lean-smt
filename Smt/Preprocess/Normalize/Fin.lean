@@ -19,6 +19,15 @@ attribute [fin_normalize ↓] Fin.val_mul Fin.val_mod
     f = g ↔ ∀ i, f i = g i :=
   ⟨fun h i => congrFun h i, funext⟩
 
+attribute [fin_normalize ↓] Fin.isLt
+
+@[fin_normalize ↓] theorem finIntValLt (i : Fin n) : (i.val : Int) < (n : Int) :=
+  Int.ofNat_lt.mpr i.isLt
+
+-- For symbolic n the general literal rule produces 0 % n.
+@[fin_normalize ↓] theorem finValZero (n : Nat) [NeZero n] : (0 : Fin n).val = 0 :=
+  Nat.zero_mod _
+
 -- The sum of two indices can wrap at most once. Keeping the resulting constraint
 -- linear lets the arithmetic proof reconstructor handle symbolic bounds.
 @[fin_normalize ↓] theorem finValAdd (i j : Fin n) : (i + j).val =

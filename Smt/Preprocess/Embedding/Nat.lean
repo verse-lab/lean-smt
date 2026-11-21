@@ -80,9 +80,8 @@ theorem Int.toNat_ne_toNat_of_nonneg {x y : Int} (hx : x ≥ 0) (hy : y ≥ 0) :
   | .ofNat n, .ofNat m =>
     simp only [Int.ofNat_eq_natCast, Int.toNat_natCast, ne_eq, Int.natCast_inj]
 
--- A child rewrite (for example Fin.val_mk) can expose the inner literal or toNat only
--- after the top-down cast rules have run in the single-pass embedding.
-attribute [embedding] Int.cast_ofNat_Int Int.ofNat_toNat'
+-- A Fin projection may expose a cast after its top-down rule has already run.
+attribute [fin_embedding] Int.cast_ofNat_Int Int.ofNat_toNat'
 
 namespace Smt.Preprocess.Embedding
 

@@ -87,7 +87,9 @@ def finContext (roots : Array Expr) : MetaM (Bool × Array FVarId) := do
       let nonempty ← Meta.mkAppM ``Nonempty #[domain]
       if let some fv ← Meta.findLocalDeclWithType? nonempty then
         witnesses := witnesses.push fv
-      else if (← Meta.synthInstance? nonempty).isNone then
+      else if let some inst ← Meta.synthInstance? nonempty then
+        witnesses := witnesses ++ (Lean.collectFVars {} inst).fvarIds
+      else
         witnesses := #[]
         break
     keep := keep ++ witnesses
