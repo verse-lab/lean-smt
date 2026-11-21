@@ -9,6 +9,7 @@ module
 
 public import Lean.Meta.Basic
 public meta import Lean.Meta.Basic
+public meta import Lean.Meta.Tactic.Simp
 public import Lean.Meta.InferType
 public meta import Lean.Meta.InferType
 
@@ -22,6 +23,43 @@ structure Result where
   map : Std.HashMap Expr (Array Expr)
   hs : Array Expr
   mv : MVarId
+
+/-- Give each non-local hint a local declaration so that it can be reverted. Record
+the first declaration for each expression, including when the same hint occurs twice. -/
+def assertHints (mv : MVarId) (hs : Array Expr) :
+    MetaM (Array FVarId × Std.HashMap Expr Expr × MVarId) := do
+  let (locals, others) := hs.partition Expr.isFVar
+  let hypotheses ← others.mapM fun h => do
+    return { userName := .anonymous, type := ← Meta.inferType h, value := h : Meta.Hypothesis }
+  let (fresh, mv) ← mv.assertHypotheses hypotheses
+  let mut originalToLocal : Std.HashMap Expr Expr := {}
+  for h in locals do originalToLocal := originalToLocal.insert h h
+  for (h, fv) in others.zip fresh do originalToLocal := originalToLocal.insertIfNew h (.fvar fv)
+  return (locals.map Expr.fvarId! ++ fresh, originalToLocal, mv)
+
+/-- Translate selected hints to their reintroduced declarations and preserve provenance
+for unsat cores. The two maps straddle reversion and reintroduction. -/
+def restoreHints (hs : Array Expr) (originalToLocal localToNew : Std.HashMap Expr Expr) :
+    Array Expr × Std.HashMap Expr (Array Expr) := Id.run do
+  let originalToNew := originalToLocal.fold (init := localToNew) fun map h localHint =>
+    map.insert h (map.getD localHint localHint)
+  let provenance := originalToNew.fold (init := {}) fun map h h' => map.insert h' #[h]
+  return (hs.map fun h => originalToNew.getD h h, provenance)
+
+/-- Run the ordered base and optional Fin rewrites in one pass over the target. -/
+def simpTargetWithExtensions (mv : MVarId) (base fin : Name) (enableFin : Bool) : MetaM MVarId := do
+  let names := if enableFin then #[base, fin] else #[base]
+  let mut theorems := #[]
+  let mut simprocs := #[]
+  for name in names do
+    let some thms ← Meta.getSimpExtension? name | throwError "missing {name} simp extension"
+    let some procs ← Meta.Simp.getSimprocExtension? name | throwError "missing {name} simproc extension"
+    theorems := theorems.push (← thms.getTheorems)
+    simprocs := simprocs.push (← procs.getSimprocs)
+  let ctx ← Meta.Simp.mkContext { zeta := false, singlePass := true } theorems (← Meta.getSimpCongrTheorems)
+  let (some mv, _) ← Meta.simpTarget mv ctx simprocs (mayCloseGoal := false)
+    | throwError "[{base}] simplification failed"
+  return mv
 
 /-- Return all propositions in the local context. -/
 def getPropHyps : MetaM (Array FVarId) := do

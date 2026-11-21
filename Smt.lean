@@ -15,6 +15,8 @@ public import Smt.Builtin
 public meta import Smt.Builtin
 public import Smt.Datatype
 public meta import Smt.Datatype
+public import Smt.Fin
+public meta import Smt.Fin
 public import Smt.Int
 public meta import Smt.Int
 public import Smt.Nat

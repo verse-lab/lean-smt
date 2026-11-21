@@ -142,6 +142,29 @@ def addDefineCommandFor (nm : String) (e : Expr) (params : Array Expr) (cod : Ex
     addCommand e <| .defineFun nm tmParams tmCod tmVal isRec
     return deps ++ deps'
 
+/-- A sort alias can hide an empty Fin in a function space, a type argument, or a
+constructor field. Follow those types, visiting recursive inductives only once per path. -/
+private partial def hasFinSort (type : Expr) : MetaM Bool :=
+  (visit type []).run
+where
+  visit (type : Expr) (ancestors : List Name) : MonadCacheT (Expr × List Name) Bool MetaM Bool := do
+    let type ← Meta.whnf type
+    -- A negative result can depend on which recursive inductives we skipped.
+    checkCache (type, ancestors) fun _ => do
+      if type.isAppOfArity ``Fin 1 then return true
+      if let .forallE name domain body bi := type then
+        if ← visit domain ancestors then return true
+        return ← withLocalDecl name bi domain fun x => visit (body.instantiate1 x) ancestors
+      let args := type.getAppArgs
+      if ← args.anyM (fun a => do if ← Meta.isType a then visit a ancestors else return false) then return true
+      let .const name levels := type.getAppFn | return false
+      if ancestors.contains name then return false
+      let some (.inductInfo info) := (← getEnv).find? name | return false
+      info.ctors.anyM fun ctor => do
+        let type ← inferType (mkAppN (mkConst ctor levels) (args.take info.numParams))
+        forallTelescope type fun fields _ =>
+          fields.anyM fun field => do visit (← inferType field) (name :: ancestors)
+
 def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod : Expr)
     : QueryBuilderM (Array Expr) := do
   if cod.isSort && !cod.isProp then
@@ -180,6 +203,8 @@ def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod 
             if allOk then
               addCommand e <| .declareDatatypes [(nm, 0)] [ctorDecls]
               return allDeps
+    if ← hasFinSort (mkAppN e params) then
+      throwError "cannot declare {mkAppN e params} as an uninterpreted SMT sort: it contains Fin"
     addCommand e <| .declareSort nm params.size
     return #[]
   else
