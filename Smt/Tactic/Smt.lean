@@ -204,16 +204,19 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   -- when it does not appear in the Lean target or hints.
   let inhabitation := (← Meta.getLocalInstances).filterMap fun inst =>
     if inst.className == ``Nonempty || inst.className == ``Inhabited then some inst.fvar.fvarId! else none
-  let mv₀ ← mv₀.cleanup (hints.fvarIds ++ inhabitation)
+  let fin ← if cfg.embeddings || cfg.normalize || cfg.trust then
+    Preprocess.finContext ((← hs.mapM Meta.inferType) ++ hs.push goalType)
+    else pure {}
+  let mv₀ ← mv₀.cleanup (hints.fvarIds ++ inhabitation ++ fin.keep)
   trace[smt.preprocess] "after cleanup: {mv₀}"
   mv₀.withContext do
   -- 2. Preprocess the hints and goal.
   let steps := if cfg.mono then #[Preprocess.mono] else #[Preprocess.pushHintsToCtx] ++
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
-  let steps := if cfg.normalize then steps.push Preprocess.normalize else steps
+  let steps := if cfg.normalize then steps.push (Preprocess.normalizeWithFin fin.usesFin) else steps
   let steps :=
     if cfg.embeddings then
-      steps.push <| Preprocess.embeddingWithConfig { embedBool := cfg.embedBool }
+      steps.push <| Preprocess.embeddingWithConfigAndFin { embedBool := cfg.embedBool } fin.usesFin
     else
       steps
   let ⟨map, hs₁, mv₁⟩ ← Preprocess.applySteps mv₀ hs steps
@@ -234,8 +237,14 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     trace[smt] "\nquery:\n{query}"
   -- 4. Run the solver.
   -- With `trust` the unsat core is never read, and without proofs cvc5 computes it slowly.
-  let options := defaultSolverOptions ++ (if cfg.trust then [("produce-unsat-cores", "false")] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
-  let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!cfg.trust) options
+  let userSorts := cmds.any fun
+    | .declareSort .. | .defineSort .. | .declareDatatypes .. => true
+    | _ => false
+  let trust := cfg.trust && !(fin.usesFin && userSorts)
+  if cfg.trust && !trust then
+    trace[smt] "reconstructing this Fin query because a user-defined SMT sort may be empty in Lean"
+  let options := defaultSolverOptions ++ (if trust then [("produce-unsat-cores", "false")] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
+  let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!trust) options
   -- trace[smt] "\nresult: {res}"
   if asyncState.sendRawResult then
     asyncState.send asyncId (.rawResult res)
@@ -249,7 +258,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     trace[smt.solve] "\nunknown reason:\n{r}\n"
     finish (.unknown r.toString)
   | .ok (.unsat pf uc) =>
-    if cfg.trust then
+    if trust then
       -- 6. Trust the result by admitting original goal.
       -- We make this a non-synthetic `sorry` because morally it is requested
       -- by the user rather than showing a tactic failure.

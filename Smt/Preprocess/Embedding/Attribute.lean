@@ -13,3 +13,5 @@ public meta import Lean.Meta.Tactic.Simp.RegisterCommand
 public meta section
 
 register_simp_attr embedding
+
+register_simp_attr fin_embedding
