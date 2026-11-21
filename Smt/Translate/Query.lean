@@ -60,8 +60,10 @@ def addDependency (e e' : Expr) : QueryBuilderM Unit :=
 When `fvarDeps = false`, we filter out dependencies on fvars. -/
 def translateAndFindDeps (e : Expr) (fvarDeps := true) : QueryBuilderM (Term × Array Expr) := do
   let (tm, depConsts, depFVars) ← Translator.translateExpr e
+  let constants := (← getThe TranslationM.State).constants
   let unknownConsts := depConsts.toArray.filterMap fun nm =>
-    if Util.smtConsts.contains nm.toString then none else some (mkConst nm)
+    if Util.smtConsts.contains nm.toString then none
+    else some (constants.getD (Util.constSymbol nm) (mkConst nm))
   if fvarDeps then
     let fvs := depFVars.toArray.map mkFVar
     return (tm, fvs ++ unknownConsts)
@@ -73,11 +75,12 @@ this hides encoding tricks used to prove termination.
 
 Given an equation theorem of the form `∀ x₁ ⬝⬝⬝ xₙ, c x₁ ⬝⬝⬝ xₙ = body`,
 we return `fun x₁ ⬝⬝⬝ xₙ => body`. -/
-def getConstBodyFromEqnTheorem (nm : Name) : MetaM Expr := do
+def getConstBodyFromEqnTheorem (nm : Name) (levels : Option (List Level) := none) : MetaM Expr := do
   let some eqnThm ← getUnfoldEqnFor? (nonRec := true) nm
     | throwError "failed to retrieve equation theorem for '{nm}'"
   let eqnInfo ← getConstInfo eqnThm
-  forallTelescopeReducing eqnInfo.type fun args eqn => do
+  let tp := levels.elim eqnInfo.type eqnInfo.instantiateTypeLevelParams
+  forallTelescopeReducing tp fun args eqn => do
     let some (_, _, e) := eqn.eq? | throwError "unexpected equation theorem{indentD eqn}"
     mkLambdaFVars args e
 
@@ -107,7 +110,7 @@ def translateDefinitionBody (params : Array Expr) : Expr → QueryBuilderM (Term
     let val ← makeFullyAppliedBody val params
     let (tmVal, deps) ← translateAndFindDeps val
     return (tmVal, deps, val.hasAnyFVar (· == id))
-  | const nm .. => do
+  | .const nm levels => do
     let mutRecFuns := ConstantInfo.all (← getConstInfo nm)
     -- TODO: Replace by `DefinitionVal.isRec` check when (if?) it gets added to Lean core.
     if mutRecFuns.length > 1 then
@@ -116,7 +119,7 @@ def translateDefinitionBody (params : Array Expr) : Expr → QueryBuilderM (Term
     -- Look for an equational definition before defaulting to Lean's equational theorem.
     let val ← match (← getEqnDefLamFor? nm) with
     | some val => pure val
-    | none => getConstBodyFromEqnTheorem nm
+    | none => getConstBodyFromEqnTheorem nm levels
     let val ← makeFullyAppliedBody val params
     -- Note that we temporarily store `params` free variables as (incorrect) dependencies,
     -- but they are filtered out later in `addCommandFor`.
@@ -126,10 +129,18 @@ def translateDefinitionBody (params : Array Expr) : Expr → QueryBuilderM (Term
 
 def addDefineCommandFor (nm : String) (e : Expr) (params : Array Expr) (cod : Expr)
     : QueryBuilderM (Array Expr) := do
+  -- Assign telescope parameters before translating any occurrence in the definition.
+  for param in params do
+    let id := param.fvarId!
+    let n ← Util.freshVarName (← id.getUserName) fun s => do
+      (← getLCtx).anyM fun d => do
+        return d.fvarId != id && (← Translator.fvarSymbol d.fvarId) == s
+    modifyThe TranslationM.State fun st =>
+      { st with uniqueFVarNames := st.uniqueFVarNames.insert id n.toString }
   -- Translate the body and the parameter types.
   let (tmVal, deps, isRec) ← translateDefinitionBody params e
   let (tmParams, deps) ← params.foldrM (init := ([], deps)) fun param (tmParams, deps) => do
-    let n := (← getFVarLocalDecl param).userName.toString
+    let n ← Translator.fvarSymbol param.fvarId!
     let (tm, deps') ← translateAndFindDeps (← inferType param)
     return ((n, tm) :: tmParams, deps ++ deps')
 
@@ -158,24 +169,16 @@ def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod 
             for ctorNm in iVal.ctors do
               match (← getEnv).find? ctorNm with
               | some (.ctorInfo cVal) =>
-                let fields := ctorFieldTypes cVal.numFields cVal.type
+                let levels := e.constLevels!
+                let ctor ← Translator.recordConst (mkConst ctorNm levels)
+                let fields := ctorFieldTypes cVal.numFields (cVal.instantiateTypeLevelParams levels)
                 let mut fieldDecls : List (String × Term) := []
-                let mut selectorNames : Std.HashSet String := {}
-                let mut idx := 0
-                for (fname, ftype) in fields do
-                  let baseName :=
-                    if fname == Name.anonymous then s!"field{idx + 1}" else fname.toString
-                  let mut selectorName := s!"{ctorNm}.{baseName}"
-                  let mut suffix := 1
-                  while selectorNames.contains selectorName do
-                    selectorName := s!"{ctorNm}.{baseName}_{suffix}"
-                    suffix := suffix + 1
-                  selectorNames := selectorNames.insert selectorName
+                for (ftype, idx) in fields.zipIdx do
+                  let selectorName := s!"{ctorNm.mangle "$sel!"}!{idx}"
                   let (tmSort, deps) ← translateAndFindDeps ftype (fvarDeps := false)
                   fieldDecls := fieldDecls ++ [(selectorName, tmSort)]
                   allDeps := allDeps ++ deps
-                  idx := idx + 1
-                ctorDecls := ctorDecls ++ [(ctorNm.toString, fieldDecls)]
+                ctorDecls := ctorDecls ++ [(ctor, fieldDecls)]
               | _ => allOk := false
             if allOk then
               addCommand e <| .declareDatatypes [(nm, 0)] [ctorDecls]
@@ -187,10 +190,10 @@ def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod 
     addCommand e <| .declare nm tmTp
     return deps
 where
-  /-- Extract the first `n` field name/type pairs from a constructor's type (a chain of `forallE`). -/
-  ctorFieldTypes : Nat → Expr → List (Name × Expr)
+  /-- Extract the first `n` field types from a constructor's type (a chain of `forallE`). -/
+  ctorFieldTypes : Nat → Expr → List Expr
     | 0, _ => []
-    | n + 1, .forallE nm ftype body _ => (nm, ftype) :: ctorFieldTypes n body
+    | n + 1, .forallE _ ftype body _ => ftype :: ctorFieldTypes n body
     | _, _ => []
 
 /-- Build the command for `e : tp` and add it to the graph. Return the command's dependencies. -/
@@ -206,7 +209,7 @@ def addCommandFor (e tp : Expr) : QueryBuilderM (Array Expr) := do
   -- Otherwise it is a local/global declaration with name `nm`.
   let nm ← match e with
     | fvar id .. => Translator.fvarSymbol id
-    | const n .. => pure n.toString
+    | const .. => Translator.recordConst e
     | _          => throwError "internal error, expected fvar or const but got{indentD e}\nof kind {e.ctorName}"
 
   -- Introduce the declaration's parameters and codomain.
@@ -264,16 +267,14 @@ def natAssertBody (t : Term) : Term :=
 
 /-- TODO: remove this hack once we have a tactic that replaces Nat goals with Int goals. -/
 def natConstAssert (n : String) (args : List Name) : Term → MetaM Term
-  | arrowT i@(symbolT "Nat") t => do
-    let id ← mkFreshId
-    return (forallT id.toString i
-                   (imp id.toString (← natConstAssert n (id::args) t)))
   | arrowT a t => do
-    let id ← mkFreshId
-    return (forallT id.toString a (← natConstAssert n (id::args) t))
+    let id ← Util.freshVarName `arg fun s => return s == n || args.any (·.toString == s)
+    let body ← natConstAssert n (id :: args) t
+    let body := if a matches symbolT "Nat" then
+      mkApp2 (symbolT "=>") (natAssertBody (symbolT id.toString)) body else body
+    return forallT id.toString a body
   | _ => pure $ natAssertBody (applyList n args)
   where
-    imp n t := appT (appT (symbolT "=>") (natAssertBody (symbolT n))) t
     applyList n : List Name → Term
       | [] => symbolT n
       | t :: ts => appT (applyList n ts) (symbolT t.toString)
@@ -295,7 +296,8 @@ def emitVertex (cmds : Std.HashMap Expr Command) (e : Expr) : StateT (List Comma
   let some cmd := cmds[e]? | throwError "no command was computed for {e}"
   set (← addCommand cmd (← get))
 
-def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) :=
+def generateQueryWithSymbols (hs : List Expr) (fvNames : Std.HashMap FVarId String) :
+    MetaM (List Command × Std.HashMap String Expr) :=
   withTraceNode `smt.translate.query (fun _ => pure .nil) do
     trace[smt.translate.query] "Provided Hints: {hs}"
     let dfns ← hs.filterM fun h => do
@@ -309,7 +311,7 @@ def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM
       else
         return false
     trace[smt.translate.query] "Definitions: {dfns}"
-    let ((_, st), _) ← QueryBuilderM.buildDependencyGraph
+    let ((_, st), translation) ← QueryBuilderM.buildDependencyGraph
       |>.run { toProcess := hs, toDefine := dfns : QueryBuilderM.Config }
       |>.run { : QueryBuilderM.State }
       |>.run { uniqueFVarNames := fvNames : TranslationM.State }
@@ -317,6 +319,9 @@ def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM
     -- The type of the proof generated by a solver depends on the order of asserions. We assert the
     -- Lean goal at the end of the query to simplify unification during proof reconstruction.
     let (_, cmds) ← StateT.run (st.graph.orderedDfs hs (emitVertex st.commands)) []
-    return cmds.reverse
+    return (cmds.reverse, translation.constants)
+
+def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) :=
+  Prod.fst <$> generateQueryWithSymbols hs fvNames
 
 end Smt.Translate.Query

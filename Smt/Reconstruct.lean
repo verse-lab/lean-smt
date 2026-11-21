@@ -29,7 +29,7 @@ open Lean
 open Attribute
 
 structure Reconstruct.Context where
-  /-- The user names of the variables in the local context. -/
+  /-- Lean expressions corresponding to symbols in the query. -/
   userNames : Std.HashMap String Expr := {}
   /-- The cardinality of sorts in a model. -/
   sortCard : Std.HashMap cvc5.Sort Nat := {}
@@ -54,6 +54,15 @@ abbrev TermReconstructor := cvc5.Term → ReconstructM (Option Expr)
 abbrev ProofReconstructor := cvc5.Proof → ReconstructM (Option Expr)
 
 namespace Reconstruct
+
+def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
+  match (← read).userNames[n]? with
+  | some e => return e
+  | none   => match (← getLCtx).findFromUserName? n.toName with
+    | some d => return d.toExpr
+    | none   =>
+      let c ← getConstInfo n.toName
+      return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
 
 def useNative : ReconstructM Bool :=
   read >>= pure ∘ (·.native)

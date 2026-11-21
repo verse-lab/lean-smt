@@ -19,20 +19,6 @@ public meta import Smt.Util
 
 public meta section
 
-/-- Return true iff `e` contains a free variable which satisfies `p`. -/
-@[inline] private def Lean.Expr.hasAnyFVar' [Monad m] (e : Expr) (p : FVarId → m Bool) : m Bool :=
-  let rec @[specialize] visit (e : Expr) := do if !e.hasFVar then return false else
-    match e with
-    | Expr.forallE _ d b _   => return (← visit d) || (← visit b)
-    | Expr.lam _ d b _       => return (← visit d) || (← visit b)
-    | Expr.mdata _ e         => visit e
-    | Expr.letE _ t v b _    => return (← visit t) || (← visit v) || (← visit b)
-    | Expr.app f a           => return (← visit f) || (← visit a)
-    | Expr.proj _ _ e        => visit e
-    | Expr.fvar fvarId       => p fvarId
-    | _                      => return false
-  visit e
-
 namespace Smt
 
 open Lean Meta Expr
@@ -48,6 +34,8 @@ structure TranslationM.State where
   /-- Free variables introduced during translation (from binder expressions). Those should NOT be
   propegated upwards during translation. -/
   localFVars : FVarIdSet := {}
+  /-- Actual constant instances by emitted symbol, shared by query building and reconstruction. -/
+  constants : Std.HashMap String Expr := {}
   /-- Memoizes `applyTranslators?` calls together with what they add to `depConstants` and `depFVars`. -/
   cache : Std.HashMap Expr (Option (Term × NameSet × FVarIdSet)) := {}
   /-- A mapping from fvars to unique names. -/
@@ -111,10 +99,16 @@ def fvarSymbol (fv : FVarId) : TranslationM String := do
   | some n => return n
   | none   => return (← fv.getUserName).toString
 
-/-- Run `k` with a name for a variable bound over `b`, based on `n` but renamed if needed so that
-it does not capture any symbol that may occur in the translation of `b`. -/
-def withScopedName (n : Name) (b : Expr) (k : Name → TranslationM α) : TranslationM α := do
-  k (← Util.freshVarName n fun n' => b.hasAnyFVar' fun fv => return (← fvarSymbol fv) == n'.toString)
+/-- Record the Lean instance behind an SMT symbol. A single declaration cannot represent two
+different universe instantiations in the same query. -/
+def recordConst (e : Expr) : TranslationM String := do
+  let s := Util.constSymbol e.constName!
+  if let some prev := (← get).constants[s]? then
+    unless prev == e do
+      throwError "SMT symbol '{s}' represents multiple Lean constants or universe instances"
+  else
+    modify fun st => { st with constants := st.constants.insert s e }
+  return s
 
 mutual
 
@@ -147,25 +141,34 @@ partial def applyTranslators? : Translator := withCache fun e => do
         return symbolT (← fvarSymbol fv)
       | const nm _ =>
         modify fun st => { st with depConstants := st.depConstants.insert nm }
-        return symbolT nm.toString
+        return symbolT (← recordConst e)
       | app f e => return appT (← applyTranslators! f) (← applyTranslators! e)
       | lam .. => throwError "cannot translate {e}, SMT-LIB does not support lambdas"
-      | forallE n t b bi => withScopedName n b fun n => do
-        let tmB ← Meta.withLocalDecl n bi t (translateBody b)
+      | forallE n t b bi =>
+        let (n, tmB) ← translateBinder n bi t b
         if !b.hasLooseBVars /- not a dependent arrow -/ then
           return arrowT (← applyTranslators! t) tmB
         else
-          return forallT n.toString (← applyTranslators! t) tmB
-      | letE n t v b true =>
-        let tmB ← Meta.withLetDecl n t v (translateBody b)
-        return letT n.toString (← applyTranslators! v) tmB
+          return forallT n (← applyTranslators! t) tmB
+      | letE n t v b _ =>
+        let (n, tmB) ← translateBinder n .default t b v
+        return letT n (← applyTranslators! v) tmB
       | mdata _ e => go ts e
       | e         => throwError "cannot translate {e}"
-    translateBody (b : Expr) (x : Expr) : TranslationM Term := do
-      modify fun s => { s with localFVars := s.localFVars.insert x.fvarId! }
-      let tmB ← applyTranslators! (b.instantiate #[x])
-      modify fun s => { s with localFVars := s.localFVars.erase x.fvarId! }
-      return tmB
+
+/-- Open a binder with the same fresh symbol that will be written in its SMT declaration. -/
+partial def translateBinder (n : Name) (bi : BinderInfo) (t b : Expr) (value? : Option Expr := none) :
+    TranslationM (String × Term) := do
+  let fvs := (Lean.collectFVars {} b).fvarIds
+  let n ← Util.freshVarName n fun s => fvs.anyM fun fv => return (← fvarSymbol fv) == s
+  let translateBody (x : Expr) : TranslationM Term := do
+    modify fun st => { st with localFVars := st.localFVars.insert x.fvarId! }
+    try applyTranslators! (b.instantiate1 x)
+    finally modify fun st => { st with localFVars := st.localFVars.erase x.fvarId! }
+  let body ← match value? with
+    | some v => Meta.withLetDecl n t v translateBody
+    | none => Meta.withLocalDecl n bi t translateBody
+  return (n.toString, body)
 
 end
 

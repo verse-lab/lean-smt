@@ -31,3 +31,10 @@ query:
 (assert (not (< exp_1 let_1)))
 (check-sat)
 Test/Issues/NameCapture.lean:43:0: warning: declaration uses `sorry`
+goal: ∀ (x : Nat), x + 1 > x ∧ _root_.x ≤ _root_.x
+
+query:
+(set-logic ALL)
+(declare-const x Int)
+(assert (not (forall ((x_1 Int)) (=> (>= x_1 0) (and (> (+ x_1 1) x_1) (<= x x))))))
+(check-sat)

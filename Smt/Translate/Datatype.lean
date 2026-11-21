@@ -47,9 +47,11 @@ mechanism. Only fully applied constructors are handled. -/
   -- Only handle fully applied constructors.
   if args.size != v.numFields then return none
   -- Mark the inductive type as a dependency; the query builder will declare it.
+  let _ ← recordConst (mkConst inductName e.getAppFn.constLevels!)
+  let ctor ← recordConst e.getAppFn
   modify fun st => { st with depConstants := st.depConstants.insert inductName }
   -- Translate constructor arguments and build the application.
   let translatedArgs ← args.mapM applyTranslators!
-  return some (translatedArgs.foldl appT (symbolT v.name.toString))
+  return some (translatedArgs.foldl appT (symbolT ctor))
 
 end Smt.Translate.Datatype

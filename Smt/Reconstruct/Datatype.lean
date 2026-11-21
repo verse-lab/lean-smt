@@ -39,15 +39,6 @@ private def isBuiltinName (n : Name) : Bool :=
 private def stripSMTPipes (s : String) : String :=
   if s.startsWith "|" && s.endsWith "|" then (s.drop 1 |>.dropEnd 1).toString else s
 
-private def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
-  match (← read).userNames[n]? with
-  | some e => return e
-  | none   => match (← getLCtx).findFromUserName? n.toName with
-    | some d => return d.toExpr
-    | none   =>
-      let c ← getConstInfo n.toName
-      return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
-
 @[smt_sort_reconstruct] def reconstructDatatypeSort : SortReconstructor := fun s => do
   match s.getKind! with
   | .DATATYPE_SORT =>

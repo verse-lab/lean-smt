@@ -257,6 +257,14 @@ def reconstructRewrite (pf : cvc5.Proof) : ReconstructM (Option Expr) := do
       reconstructForallCong pf
     else if k == .EXISTS then
       reconstructExistsCong pf
+    else if k == .LAMBDA then
+      -- Rewriting a define-fun body produces congruence under its parameter binders.
+      let xs := pf.getResult[0]![0]!.getChildren.map fun x =>
+        (getVariableName x, fun _ => reconstructSort x.getSort!)
+      let h ← Meta.withLocalDeclsD xs fun xs => withNewTermCache <| withNewProofCache do
+        let h ← reconstructProof pf.getChildren[0]!
+        xs.foldrM (fun x h => do Meta.mkAppM ``funext #[← Meta.mkLambdaFVars #[x] h]) h
+      addThm (← reconstructTerm pf.getResult) h
     else
       return none
   | .SKOLEMIZE => reconstructSkolemize pf

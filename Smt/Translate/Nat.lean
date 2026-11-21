@@ -62,16 +62,10 @@ private def mkNat : Lean.Expr :=
 @[smt_translate] def translateForalls : Translator
   | e@(forallE n t@(const ``Nat _) b bi) => do
     if e.isArrow then return none
-    let tmB ← Meta.withLocalDecl n bi t (translateBody b)
-    let tmGeqZero := Term.mkApp2 (symbolT ">=") (symbolT n.toString) (literalT "0")
+    let (n, tmB) ← translateBinder n bi t b
+    let tmGeqZero := Term.mkApp2 (symbolT ">=") (symbolT n) (literalT "0")
     let tmProp := Term.mkApp2 (symbolT "=>") tmGeqZero tmB
-    return forallT n.toString (symbolT "Int") tmProp
+    return forallT n (symbolT "Int") tmProp
   | _ => return none
-where
-  translateBody (b : Expr) (x : Expr) : TranslationM Term := do
-    modify fun s => { s with localFVars := s.localFVars.insert x.fvarId! }
-    let tmB ← applyTranslators! (b.instantiate #[x])
-    modify fun s => { s with localFVars := s.localFVars.erase x.fvarId! }
-    return tmB
 
 end Smt.Translate.Nat

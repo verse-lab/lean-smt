@@ -56,17 +56,10 @@ private def mkBool : Lean.Expr :=
 @[smt_translate] def translateExists : Translator
   | e@(app (app (const `Exists _) _) f) => do
     let lam n t b bi := f | throwError "unexpected predicate {f} in {e}"
-    withScopedName n b fun n => do
-      let tmT ← applyTranslators! t
-      let tmB ← Meta.withLocalDecl n bi t (translateBody b)
-      return existsT n.toString tmT tmB
+    let tmT ← applyTranslators! t
+    let (n, tmB) ← translateBinder n bi t b
+    return existsT n tmT tmB
   | _ => return none
-where
-  translateBody (b : Expr) (x : Expr) : TranslationM Term := do
-    modify fun s => { s with localFVars := s.localFVars.insert x.fvarId! }
-    let tmB ← applyTranslators! (b.instantiate #[x])
-    modify fun s => { s with localFVars := s.localFVars.erase x.fvarId! }
-    return tmB
 
 /- @Eq.rec : {α : Sort u_2} →
   {a : α} → {motive : (a_1 : α) → a = a_1 → Sort u_1} → motive a (_ : a = a) → {a_1 : α} → (t : a = a_1) → motive a_1 t -/
@@ -95,13 +88,7 @@ def emitIte (cond : Expr) (t : TranslationM Term) (f : TranslationM Term)
 
 -- Remove local `have` proofs.
 @[smt_translate] def translateHave : Translator := fun e => do
-  if !e.isHave then return none
-  Meta.letTelescope e.appFn! (nondepLetOnly := true) fun args bd => do
-    trace[smt.translatePropLetFun] "found let_fun {e}"
-    let #[arg] := args | return none
-    trace[smt.translatePropLetFun] "arg : {arg}"
-    if !(← Meta.inferType (← Meta.inferType arg)).isProp then return none
-    trace[smt.translatePropLetFun] "translating {bd.instantiate #[arg]}"
-    applyTranslators? (bd.instantiate #[arg])
+  let .letE _ t v b true := e | return none
+  if ← Meta.isProp t then applyTranslators? (b.instantiate1 v) else return none
 
 end Smt.Translate.Prop

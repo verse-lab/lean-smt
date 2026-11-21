@@ -26,6 +26,8 @@ namespace Smt.Reconstruct.Builtin
 
 open Lean Qq
 
+export Smt.Reconstruct (getFVarOrConstExpr!)
+
 @[smt_sort_reconstruct] def reconstructBuiltinSort : SortReconstructor := fun s => do match s.getKind! with
   | .FUNCTION_SORT =>
     let ct ← reconstructSort s.getFunctionCodomainSort!
@@ -40,15 +42,6 @@ def getFVarExpr! (n : Name) : MetaM Expr := do
   match (← getLCtx).findFromUserName? n with
   | some d => return d.toExpr
   | none   => throwError "unknown free variable '{n}'"
-
-def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
-  match (← read).userNames[n]? with
-  | some e => return e
-  | none   => match (← getLCtx).findFromUserName? n.toName with
-    | some d => return d.toExpr
-    | none   =>
-      let c ← getConstInfo n.toName
-      return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
 
 def buildDistinct (u : Level) (α : Q(Sort u)) (xs : List Q($α)) : Q(Prop) :=
   go xs

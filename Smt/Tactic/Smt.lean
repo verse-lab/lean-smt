@@ -75,20 +75,13 @@ def genUniqueFVarNames : MetaM (Std.HashMap FVarId String × Std.HashMap String 
   let lCtx ← getLCtx
   let st : NameSanitizerState := { options := {}}
   let (lCtx, _) := (lCtx.sanitizeNames st).run
-  let names := lCtx.getFVarIds.map fun fvarId => (fvarId, (lCtx.getRoundtrippingUserName? fvarId).get!)
-  let mut used : NameSet := names.foldl (·.insert ·.2) {}
   let mut m₁ := {}
-  let mut m₂ := {}
-  for (fvarId, n) in names do
-    -- Rename free variables that clash with SMT-LIB builtins or global constants.
-    let n' ← Util.freshVarName n fun c => return c != n && used.contains c
-    used := used.insert n'
-    m₁ := m₁.insert fvarId n'.toString
-    m₂ := m₂.insert n'.toString (.fvar fvarId)
-    -- If `n` was renamed away from a constant, make sure the symbol `n` is reconstructed to the
-    -- constant and not to this free variable.
-    if let some c := (← getEnv).find? n then
-      m₂ := m₂.insert n.toString (.const c.name (c.numLevelParams.repeat (.zero :: ·) []))
+  let mut m₂ : Std.HashMap String Expr := {}
+  for d in lCtx do
+    let n ← Util.freshVarName d.userName fun s =>
+      return m₂.contains s || (s != d.userName.toString && (lCtx.findFromUserName? s.toName).isSome)
+    m₁ := m₁.insert d.fvarId n.toString
+    m₂ := m₂.insert n.toString d.toExpr
   return (m₁, m₂)
 
 def prepareSmtQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) := do
@@ -111,7 +104,8 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   mv₁.withContext do
   -- 3. Generate the SMT query.
   let (fvNames₁, fvNames₂) ← genUniqueFVarNames
-  let cmds ← prepareSmtQuery hs₁.toList fvNames₁
+  let (cmds, constants) ← Query.generateQueryWithSymbols hs₁.toList fvNames₁
+  let symbols := fvNames₂.insertMany constants
   let cmds := .setLogic "ALL" :: cmds
   if cfg.showQuery then
     mv.withContext do logInfo m!"goal: {goalType}\n\nquery:\n{Command.cmdsAsQuery (cmds ++ [.checkSat])}"
@@ -135,7 +129,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     return .unknown r.toString
   | .ok (.unsat pf uc) =>
     -- 5.c Reconstruct unsat core proofs.
-    let ctx := { userNames := fvNames₂, native := cfg.native }
+    let ctx := { userNames := symbols, native := cfg.native }
     let (uc, _) ← (uc.mapM Reconstruct.reconstructTerm).run ctx {}
     trace[smt] "unsat core: {uc}"
     let ts₁ ← hs₁.mapM Meta.inferType
@@ -149,7 +143,15 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
       return .unsat [] uc
     -- 7. Reconstruct proof.
     let some pf := pf | throwError "failed to reconstruct proof for unsat result"
-    let (_, ps, p, hp, mvs) ← reconstructProof pf ctx
+    let (dfns, ps, p, hp, mvs) ← reconstructProof pf ctx
+    -- cvc5 puts define-fun equations in an outer proof scope. Local definitions satisfy them by rfl.
+    let (p, hp) ← if dfns.isEmpty then pure (p, hp) else do
+      let eqs ← dfns.mapM fun eq => do
+        let some (_, lhs, rhs) := eq.eq? | throwError "expected a defining equation, got {eq}"
+        unless ← Meta.isDefEq lhs rhs do throwError "cannot discharge defining equation {eq}"
+        Meta.mkEqRefl lhs
+      let hp := mkApp hp (← Meta.mkAndIntroN eqs)
+      pure (← Meta.inferType hp, hp)
     let mv₂ ← mv₁.assert (← mkFreshId) p hp
     let ⟨_, mv₃⟩ ← mv₂.intro1
     let gs ← mv₃.apply (← Meta.mkAppOptM ``Prop.implies_false_of_not_and #[listExpr ps q(Prop)])
@@ -163,7 +165,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     let (uss, es) := model.iss.unzip
     let cs := es.map Array.size
     let sortCard := Std.HashMap.insertMany ∅ (uss.zip cs)
-    let ctx := { userNames := fvNames₂, sortCard := sortCard, native := cfg.native }
+    let ctx := { userNames := symbols, sortCard := sortCard, native := cfg.native }
     let (uss', _) ← (uss.mapM Reconstruct.reconstructSort).run ctx {}
     let uss' := uss'.map fun us => (map[us]?.getD #[us])[0]?.getD us
     let cs' := cs.map (fun n => .app (.const ``Fin []) (toExpr n))

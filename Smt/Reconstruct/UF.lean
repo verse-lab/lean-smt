@@ -20,14 +20,7 @@ namespace Smt.Reconstruct.UF
 
 open Lean Qq
 
-def getFVarOrConstExpr! (n : String) : ReconstructM Expr := do
-  match (← read).userNames[n]? with
-  | some e => return e
-  | none   => match (← getLCtx).findFromUserName? n.toName with
-    | some d => return d.toExpr
-    | none   =>
-      let c ← getConstInfo n.toName
-      return .const c.name (c.numLevelParams.repeat (.zero :: ·) [])
+export Smt.Reconstruct (getFVarOrConstExpr!)
 
 @[smt_sort_reconstruct] def reconstructUS : SortReconstructor := fun s => do match s.getKind! with
   | .UNINTERPRETED_SORT => getFVarOrConstExpr! s.getSymbol!
@@ -144,7 +137,7 @@ def reconstructRewrite (pf : cvc5.Proof) : ReconstructM (Option Expr) := do
     addTac (← reconstructTerm pf.getResult) (smtCongr · assums)
   | .HO_CONG =>
     let f ← reconstructTerm pf.getChildren[0]!.getResult[0]!
-    let g ← reconstructTerm pf.getChildren[0]!.getResult[0]!
+    let g ← reconstructTerm pf.getChildren[0]!.getResult[1]!
     let hfg ← reconstructProof pf.getChildren[0]!
     let hs := pf.getChildren[1:]
     let buildProof := fun (f₁, f₂, h₁) cpf => do
