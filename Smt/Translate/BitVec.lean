@@ -21,7 +21,7 @@ open Translator
 
 /-- Make a binary bitvector literal with value `n` and width `w`. -/
 private def mkLit (w : Nat) (n : Nat) : Term :=
-  let bits := Nat.toDigits 2 n |>.take w
+  let bits := Nat.toDigits 2 (n % 2 ^ w)
   .literalT <| bits.foldl (init := "#b".pushn '0' (w - bits.length)) (·.push ·)
 
 private def reduceLit (n : Expr) (e : Expr) : TranslationM Nat := do
