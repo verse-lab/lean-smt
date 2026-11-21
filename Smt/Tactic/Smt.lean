@@ -88,16 +88,18 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let goalType : Q(Prop) ← mv.getType
   let mv₀ := (← Meta.mkFreshExprMVar (← mv.getType)).mvarId!
   -- 1. Cleanup goal.
-  let keep := (← hs.foldlM (fun s h => return (← (Expr.collectFVars h).run s).snd) {}).fvarIds
-  let witnesses ← if cfg.embeddings then Preprocess.finWitnesses else pure #[]
-  let mv₀ ← mv₀.cleanup (keep ++ witnesses)
+  let keep ← hs.foldlM (fun s h => return (← (Expr.collectFVars h).run s).snd) {}
+  let (sourceFin, witnesses) ← if cfg.embeddings || cfg.normalize || cfg.trust then
+    Preprocess.finContext ((← hs.mapM Meta.inferType) ++ hs.push goalType)
+    else pure (false, #[])
+  let mv₀ ← mv₀.cleanup (keep.fvarIds ++ witnesses)
   trace[smt.preprocess] "after cleanup: {mv₀}"
   mv₀.withContext do
   -- 2. Preprocess the hints and goal.
   let steps := if cfg.mono then #[Preprocess.mono] else #[Preprocess.pushHintsToCtx] ++
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
-  let steps := if cfg.normalize then steps.push Preprocess.normalize else steps
-  let steps := if cfg.embeddings then steps.push Preprocess.embedding else steps
+  let steps := if cfg.normalize then steps.push (Preprocess.normalizeWithFin sourceFin) else steps
+  let steps := if cfg.embeddings then steps.push (Preprocess.embeddingWithFin sourceFin) else steps
   let ⟨map, hs₁, mv₁⟩ ← Preprocess.applySteps mv₀ hs steps
   mv₁.withContext do
   -- 3. Generate the SMT query.
@@ -112,8 +114,14 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     mv.withContext do trace[smt] "goal: {goalType}"
     trace[smt] "\nquery:\n{Command.cmdsAsQuery (cmds ++ [.checkSat])}"
   -- 4. Run the solver.
-  let options := defaultSolverOptions ++ (if cfg.trust then [] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
-  let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!cfg.trust) options
+  -- An SMT user sort is always inhabited. A Lean carrier in the same Fin query may be
+  -- empty, so require a kernel-checked proof of UNSAT in that case.
+  let userSorts := cmds.any fun
+    | .declareSort .. | .defineSort .. | .declareDatatypes .. => true
+    | _ => false
+  let trust := cfg.trust && !(sourceFin && userSorts)
+  let options := defaultSolverOptions ++ (if trust then [] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions
+  let res ← solve (Command.cmdsAsQuery cmds) cfg.timeout (!trust) options
   -- trace[smt] "\nresult: {res}"
   match res with
   | .error e =>
@@ -134,7 +142,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
     let uc := uc.filterMap fun p => (hs₁[p]?)
     let uc := uc.filterMap (map[·]?)
     let uc := hs.filter uc.flatten.contains
-    if cfg.trust then
+    if trust then
       -- 6. Trust the result by admitting original goal.
       mv.admit true
       return .unsat [] uc

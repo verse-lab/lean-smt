@@ -9,6 +9,9 @@ module
 
 public import Lean.Meta.Tactic.Simp
 public meta import Lean.Meta.Tactic.Simp
+public meta import Lean.Meta.Tactic.Assumption
+public meta import Lean.Meta.Tactic.Delta
+public meta import Lean.Meta.LitValues
 public import Smt.Preprocess.Basic
 public meta import Smt.Preprocess.Basic
 public import Smt.Preprocess.Embedding.Attribute
@@ -35,39 +38,109 @@ def hasReturnType (e : Expr) (p : Expr → Bool) : Bool :=
   | .forallE _ _ b _ => hasReturnType b p
   | _                => p e
 
-/-- Even an unused `x : Fin n` witnesses `0 < n`. -/
-def finWitnesses : MetaM (Array FVarId) := do
-  return (← getLCtx).foldl (init := #[]) fun ids decl =>
-    if isFin decl.type then ids.push decl.fvarId else ids
+/-- Inspect a first-order function signature without introducing hypothetical instances from
+its arguments. Unfold type aliases on the arrow spine and at the result. -/
+def functionSignature (type : Expr) : MetaM (Option (Array Expr × Expr)) := do
+  let mut result ← Meta.whnf type
+  let mut domains := #[]
+  while let .forallE _ domain body _ := result do
+    if body.hasLooseBVars then return none
+    domains := domains.push domain
+    result ← Meta.whnf body
+  return some (domains, result)
 
-def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
+-- Fin type aliases may occur solely under a quantifier, including an unused binder.
+private partial def namesFin (env : Environment) (name : Name) (seen : NameSet := {}) : Bool := Id.run do
+  if (``Fin).isPrefixOf name then return true
+  if seen.contains name then return false
+  let some (.defnInfo info) := env.find? name | return false
+  let codomain := info.type.getForallBody
+  unless codomain.isSort && !codomain.isProp do return false
+  let seen := seen.insert name
+  return (info.value.find? fun e => e.constName?.any (fun n => namesFin env n seen)).isSome
+
+private def mentionsFin (es : Array Expr) : MetaM Bool := do
+  let env ← getEnv
+  return es.any (·.contains fun e => e.constName?.any (fun n => namesFin env n))
+
+/-- A Fin value witnesses a positive bound. A Fin-valued function does so when each of its
+arguments has a witness. Keep that evidence through cleanup, including unused local values. -/
+def finContext (roots : Array Expr) : MetaM (Bool × Array FVarId) := do
+  let used ← (roots.foldl Lean.collectFVars {}).addDependencies
+  let types ← used.fvarIds.mapM FVarId.getType
+  let mut finite ← mentionsFin (roots ++ types)
+  let mut keep := #[]
+  for decl in ← getLCtx do
+    if !finite && decl.type.hasAnyFVar used.fvarSet.contains then
+      finite ← mentionsFin #[decl.type]
+    if ← Meta.isProp decl.type then continue
+    let some (domains, result) ← functionSignature decl.type | continue
+    unless isFin result && domains.size ≤ 5 do continue
+    let bound := result.appArg!
+    unless used.fvarSet.contains decl.fvarId || bound.hasAnyFVar used.fvarSet.contains ||
+        (!bound.hasFVar && (← Meta.getNatValue? bound) == some 0) do continue
+    let mut witnesses := #[decl.fvarId]
+    for domain in domains do
+      if let some fv ← Meta.findLocalDeclWithType? domain then
+        witnesses := witnesses.push fv
+        continue
+      let nonempty ← Meta.mkAppM ``Nonempty #[domain]
+      if let some fv ← Meta.findLocalDeclWithType? nonempty then
+        witnesses := witnesses.push fv
+      else if (← Meta.synthInstance? nonempty).isNone then
+        witnesses := #[]
+        break
+    keep := keep ++ witnesses
+  -- Reconstruction can need an otherwise unused witness of an abstract SMT sort.
+  -- Only preserve witnesses of type parameters occurring in this Fin query.
+  if finite || !keep.isEmpty then
+    for decl in ← getLCtx do
+      let t := decl.type
+      let carrier := if t.isAppOfArity ``Nonempty 1 || t.isAppOfArity ``Inhabited 1 then t.appArg! else t
+      if carrier.isFVar && used.fvarSet.contains carrier.fvarId! && (← Meta.inferType carrier).isType then
+        keep := keep.push decl.fvarId
+  return (finite || !keep.isEmpty, keep)
+
+def embeddingWithFin (enableFin : Bool) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
   -- Find all free vars to revert in `hs` and `mv`.
   let ts ← hs.mapM Meta.inferType
-  let used := (ts.push (← mv.getType) ++ (← finWitnesses).map Expr.fvar).foldl Lean.collectFVars {}
+  let roots := (ts.push (← mv.getType)).foldl Lean.collectFVars {}
+  let (hasFin, finite) ← if enableFin then finContext (ts.push (← mv.getType)) else pure (false, #[])
   -- A symbolic Fin bound can occur only in the type of a function argument.
-  let used ← used.addDependencies
+  let used ← ((finite.map Expr.fvar).foldl Lean.collectFVars roots).addDependencies
   -- Check if we need to do anything.
   let bts := if (← getEnv).contains `Real then  #[``Nat, ``Rat, ``Bool] else #[``Nat, ``Bool]
   let fvts ← used.fvarIds.mapM FVarId.getType
-  if !(fvts ++ ts.push (← mv.getType)).any (·.contains fun e => isFin e || (bts.map (.const · [])).contains e) then
-    return ⟨{}, hs, mv⟩
-  let hasFin := (fvts ++ ts.push (← mv.getType)).any (·.contains isFin)
+  let types := fvts ++ ts.push (← mv.getType)
+  unless hasFin || types.any (·.contains ((bts.map (.const · [])).contains ·)) do
+    return { map := {}, hs, mv }
   -- Register actual witnesses of abstract argument types before reverting their values.
   -- The instances have type `Nonempty α` and stay available while simplifying under binders.
   let mut witnesses : Array Meta.Hypothesis := #[]
   if hasFin then
     for fv in used.fvarIds do
-      let α ← fv.getType
-      if α.isFVar && (← Meta.inferType α).isType && !witnesses.any (·.type.appArg! == α) then
-        let value ← Meta.mkAppM ``Nonempty.intro #[.fvar fv]
-        witnesses := witnesses.push {
-          userName := .anonymous, type := ← Meta.inferType value, value, binderInfo := .instImplicit }
+      let t ← fv.getType
+      let value ← if t.isAppOfArity ``Nonempty 1 then pure (.fvar fv)
+        else if t.isFVar && (← Meta.inferType t).isType then Meta.mkAppM ``Nonempty.intro #[.fvar fv]
+        else continue
+      let type ← Meta.inferType value
+      unless witnesses.any (·.type == type) do
+        witnesses := witnesses.push { userName := .anonymous, type, value, binderInfo := .instImplicit }
+    for h in hs do
+      let type ← Meta.inferType h
+      if type.isAppOfArity ``Nonempty 1 && !witnesses.any (·.type == type) then
+        witnesses := witnesses.push { userName := .anonymous, type, value := h, binderInfo := .instImplicit }
   let (_, mv) ← mv.assertHypotheses witnesses
   -- Find the embedding simp theorems.
   let some thmsExt ← Meta.getSimpExtension? `embedding | throwError "embedding simp extension not found"
   let some procsExt ← Meta.Simp.getSimprocExtension? `embedding | throwError "embedding simproc extension not found"
-  let simpTheorems := #[← thmsExt.getTheorems]
-  let simpProcs := #[← procsExt.getSimprocs]
+  let mut simpTheorems := #[← thmsExt.getTheorems]
+  let mut simpProcs := #[← procsExt.getSimprocs]
+  if hasFin then
+    let some finThms ← Meta.getSimpExtension? `fin_embedding | throwError "missing fin_embedding simp extension"
+    let some finProcs ← Meta.Simp.getSimprocExtension? `fin_embedding | throwError "missing fin_embedding simprocs"
+    simpTheorems := simpTheorems.push (← finThms.getTheorems)
+    simpProcs := simpProcs.push (← finProcs.getSimprocs)
   -- Assert all hypotheses that are not free vars.
   let (hs₁, hs₂) := hs.partition Expr.isFVar
   let ts₂ ← hs₂.mapM Meta.inferType
@@ -85,6 +158,9 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext d
     let ty ← fv.getType
     return !(hasFin && ty.isSort && !ty.isProp)
   let (fvs, mv) ← mv.revert fvs false
+  let env ← getEnv
+  let mv ← if hasFin then mv.deltaTarget (fun n => !(``Fin).isPrefixOf n && namesFin env n)
+    else pure mv
   -- Simplify the goal using the embedding theorems.
   let congrTheorems ← Meta.getSimpCongrTheorems
   let ctx ← Meta.Simp.mkContext { zeta := false, singlePass := true } simpTheorems congrTheorems
@@ -99,7 +175,8 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext d
   for fv in fvs do
     fvs' := fvs'.push (some fv)
     let t ← fv.getType
-    if hasReturnType t (fun e => isFin e || (bts.map (.const · [])).contains e) then
+    let result ← if hasFin then pure ((← functionSignature t).map (·.2)) else pure none
+    if hasReturnType t ((bts.map (.const · [])).contains ·) || result.any isFin then
       fvs' := fvs'.push none
   -- Re-introduce all free vars (and their `nonneg` assumptions).
   let (fvs'', mv) ← mv.introNP fvs'.size
@@ -111,6 +188,10 @@ def embedding (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext d
     | some of => (map.insert (.fvar of) (.fvar to), hs')
     | none    => (map, hs'.push (.fvar to))
   let inverseMap := compose inverseMap₁ inverseMap₂
+  -- Use Nonempty evidence through the local instances above. There is no SMT predicate
+  -- for Lean's universe-polymorphic Nonempty.
+  let hs ← if hasFin then hs.filterM (fun h => do return !(← Meta.inferType h).isAppOfArity ``Nonempty 1)
+    else pure hs
   let hs' := hs' ++ hs.map fun h => inverseMap[h]?.getD h
   let map := (inverse inverseMap).fold (init := {}) fun map k v => map.insert k #[v]
   return { map := map, hs := hs', mv }
@@ -121,5 +202,7 @@ where
   inverse (m : Std.HashMap Expr Expr) : Std.HashMap Expr Expr :=
     m.fold (init := {}) fun map k v =>
       map.insert v k
+
+def embedding := embeddingWithFin true
 
 end Smt.Preprocess

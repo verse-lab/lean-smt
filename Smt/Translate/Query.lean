@@ -142,14 +142,24 @@ def addDefineCommandFor (nm : String) (e : Expr) (params : Array Expr) (cod : Ex
     addCommand e <| .defineFun nm tmParams tmCod tmVal isRec
     return deps ++ deps'
 
-/-- Unfold sort aliases and inspect function domains and codomains. An unencoded Fin,
-including `Fin 0` inside a function space, cannot be declared as an inhabited SMT sort. -/
-private partial def hasFinSort (type : Expr) : MetaM Bool := do
+/-- A sort alias can hide an empty Fin in a function space, a type argument, or a
+constructor field. Follow those types, visiting recursive inductives only once per path. -/
+private partial def hasFinSort (type : Expr) (seen : NameSet := {}) : MetaM Bool := do
   let type ← Meta.whnf type
   if type.isAppOfArity ``Fin 1 then return true
-  let .forallE name domain body bi := type | return false
-  if ← hasFinSort domain then return true
-  withLocalDecl name bi domain fun x => hasFinSort (body.instantiate1 x)
+  if let .forallE name domain body bi := type then
+    if ← hasFinSort domain seen then return true
+    return ← withLocalDecl name bi domain fun x => hasFinSort (body.instantiate1 x) seen
+  let args := type.getAppArgs
+  if ← args.anyM (fun a => Meta.isType a <&&> hasFinSort a seen) then return true
+  let .const name levels := type.getAppFn | return false
+  if seen.contains name then return false
+  let some (.inductInfo info) := (← getEnv).find? name | return false
+  let seen := seen.insert name
+  info.ctors.anyM fun ctor => do
+    let type ← inferType (mkAppN (mkConst ctor levels) (args.take info.numParams))
+    forallTelescope type fun fields _ =>
+      fields.anyM fun field => do hasFinSort (← inferType field) seen
 
 def addDeclareCommandFor (nm : String) (e tp : Expr) (params : Array Expr) (cod : Expr)
     : QueryBuilderM (Array Expr) := do

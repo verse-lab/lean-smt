@@ -40,6 +40,29 @@ private class Witness (α : Type) where value : α
 private instance [w : Witness α] : Inhabited (Witness α) := ⟨w⟩
 private instance [w : Witness α] : Inhabited α := ⟨w.value⟩
 
+private abbrev Index (n : Nat) := Fin n
+private def DefinedIndex (n : Nat) := Index n
+private abbrev UnaryIndex (n : Nat) := Nat → Index n
+private def EmptyProduct := Prod NoIndex Unit
+private structure EmptyRecord where
+  index : NoIndex
+private def HiddenRecord := EmptyRecord
+
+example (n : Nat) (i : Index n) : i.val < n := by smt
+example (n : Nat) (i : DefinedIndex n) : i.val < n := by smt
+example (n : Nat) (i : Index n) : 0 < n := by smt
+example (n : Nat) (f : UnaryIndex n) (a : Nat) : (f a).val < n := by smt
+example (α : Type) (_a : α) (_f : α → Fin 0) : False := by smt
+example (α : Type) (h : Nonempty α) (_f : α → Fin 0) : False := by smt [h]
+example (f : (k : Nat) → Fin (k + 1)) (_i : Fin ((f 0).val + 1)) : True := by smt
+example (α : Type) (_a : α) (p : Fin 1 → α → Bool) :
+    ∃ a, p 0 a = true ∨ p 0 a = false := by smt +trust
+
+/-- error: [embedding] Fin in this function signature requires support beyond five arguments -/
+#guard_msgs in
+example (n : Nat) (f : Nat → Nat → Nat → Nat → Nat → Nat → Fin n) (a : Nat) :
+    (f a a a a a a).val < n := by smt
+
 -- These false statements must be rejected even when trusting the solver's answer.
 example : True := by
   fail_if_success have : ∃ _ : Fin 0, True := by smt +trust
@@ -63,4 +86,11 @@ example : True := by
   fail_if_success
     have bad (α : Type) (f : [Witness α] → α → Fin 0)
         (h : ∀ [w : Witness α] (a : α), (@f w a).val = 0) : False := by smt +trust [@h]
+  fail_if_success have : ∃ x : EmptyProduct, x = x := by smt +trust
+  fail_if_success have : ∃ x : HiddenRecord, x = x := by smt +trust
+  fail_if_success
+    have bad (α : Type) (p : Fin 1 → α → Bool) : ∃ a, p 0 a = true ∨ p 0 a = false := by smt +trust
+  fail_if_success have bad (α : Type) : ∃ _ : α, ∀ i : Fin 1, i = 0 := by smt +trust
+  fail_if_success
+    have bad (α : Type) (_f : Fin 0 → α → Fin 0) : ∃ _ : α, True := by smt +trust
   trivial

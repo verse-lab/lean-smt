@@ -7,6 +7,7 @@ Authors: George Pîrlea
 
 module
 
+public meta import Smt.Preprocess.Embedding
 public import Smt.Preprocess.Embedding.Attribute
 public meta import Smt.Preprocess.Embedding.Attribute
 
@@ -15,27 +16,27 @@ public meta import Lean
 
 public section
 
-attribute [embedding ↓] Fin.ext_iff
-attribute [embedding ↓ ←] Fin.val_ne_iff
-attribute [embedding ↓] Fin.val_zero
-attribute [embedding ↓] Fin.val_one
-attribute [embedding ↓] Fin.val_ofNat
-attribute [embedding ↓] Fin.mk.injEq
-attribute [embedding ↓] Fin.val_mk
-attribute [embedding ↓] Fin.le_def
-attribute [embedding ↓] Fin.lt_def
+attribute [fin_embedding ↓] Fin.ext_iff
+attribute [fin_embedding ↓ ←] Fin.val_ne_iff
+attribute [fin_embedding ↓] Fin.val_zero
+attribute [fin_embedding ↓] Fin.val_one
+attribute [fin_embedding ↓] Fin.val_ofNat
+attribute [fin_embedding ↓] Fin.mk.injEq
+attribute [fin_embedding ↓] Fin.val_mk
+attribute [fin_embedding ↓] Fin.le_def
+attribute [fin_embedding ↓] Fin.lt_def
 
 namespace Smt.Preprocess.Embedding
 
 def ofIntFin (n : Nat) (x : Int) (h : 0 ≤ x ∧ x < n) : Fin n :=
   ⟨x.toNat, (Int.toNat_lt h.1).2 h.2⟩
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem Int.natCast_ofIntFin {n : Nat} {x : Int} {h : 0 ≤ x ∧ x < n} :
     (((ofIntFin n x h : Fin n) : Nat) : Int) = x :=
   Int.toNat_of_nonneg h.1
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem intValOfNat (m n : Nat) [NeZero n] :
     (((no_index (OfNat.ofNat m : Fin n)).val : Nat) : Int) = (OfNat.ofNat m : Int) % n :=
   Int.natCast_emod m n
@@ -49,7 +50,7 @@ theorem ofIntFin_of_fin {n : Nat} (x : Fin n)
   apply Fin.ext
   simp [ofIntFin]
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_as_int {n : Nat} {p : Fin n → Prop} :
     (∀ x : Fin n, p x) ↔
     (∀ x : Int, (h : 0 ≤ x ∧ x < n) → p (ofIntFin n x h)) := by
@@ -60,7 +61,7 @@ theorem forall_fin_as_int {n : Nat} {p : Fin n → Prop} :
     have hx := h ((x : Nat) : Int) (fin_bounds x)
     simpa [ofIntFin_of_fin] using hx
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem exists_fin_as_int {n : Nat} {p : Fin n → Prop} :
     (∃ x : Fin n, p x) ↔
     (∃ x : Int, (0 ≤ x ∧ x < n) ∧ ∀ h, p (ofIntFin n x h)) := by
@@ -152,7 +153,7 @@ theorem extFin_cast {n : Nat} {β : Sort u} [FinExtension n β] (f : Fin n → �
   · rename_i hn
     exact absurd hb hn
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_in_as_int₁ {n : Nat} [FinExtension n α₁] {p : (Fin n → α₁) → Prop} :
     (∀ f : Fin n → α₁, p f) ↔
     (∀ f : Int → α₁, p (fun a => f ((a : Nat) : Int))) := by
@@ -163,7 +164,7 @@ theorem forall_fin_in_as_int₁ {n : Nat} [FinExtension n α₁] {p : (Fin n →
     have hf := h (extFin f)
     simpa [extFin_cast] using hf
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_in_as_int₂ {n : Nat} [FinExtension n α₂]
     {p : (α₁ → Fin n → α₂) → Prop} :
     (∀ f : α₁ → Fin n → α₂, p f) ↔
@@ -175,7 +176,7 @@ theorem forall_fin_in_as_int₂ {n : Nat} [FinExtension n α₂]
     have hf := h (fun a₁ => extFin (f a₁))
     simpa [extFin_cast] using hf
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_in_as_int₃ {n : Nat} [FinExtension n α₃]
     {p : (α₁ → α₂ → Fin n → α₃) → Prop} :
     (∀ f : α₁ → α₂ → Fin n → α₃, p f) ↔
@@ -187,7 +188,7 @@ theorem forall_fin_in_as_int₃ {n : Nat} [FinExtension n α₃]
     have hf := h (fun a₁ a₂ => extFin (f a₁ a₂))
     simpa [extFin_cast] using hf
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_in_as_int₄ {n : Nat} [FinExtension n α₄]
     {p : (α₁ → α₂ → α₃ → Fin n → α₄) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → Fin n → α₄, p f) ↔
@@ -199,7 +200,7 @@ theorem forall_fin_in_as_int₄ {n : Nat} [FinExtension n α₄]
     have hf := h (fun a₁ a₂ a₃ => extFin (f a₁ a₂ a₃))
     simpa [extFin_cast] using hf
 
-@[embedding ↓]
+@[fin_embedding ↓]
 theorem forall_fin_in_as_int₅ {n : Nat} [FinExtension n α₅]
     {p : (α₁ → α₂ → α₃ → α₄ → Fin n → α₅) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → α₄ → Fin n → α₅, p f) ↔
@@ -220,18 +221,18 @@ open Lean Meta Simp
 range constraint must be inhabited: in SMT, `∀ a, 0 ≤ f a ∧ f a < 0` is contradictory,
 while Lean admits such a function on an empty domain. Check the actual signature whenever
 applying an output rule, including rules exposed by earlier simplification. -/
-simproc ↓ [embedding] embed_fin_output (∀ _ : _ → _, _) := fun e => do
+simproc ↓ [fin_embedding] embed_fin_output (∀ _ : _ → _, _) := fun e => do
   let .forallE _ ty _ _ := e | return .continue
   let arities := #[``forall_fin_out_as_int₁, ``forall_fin_out_as_int₂, ``forall_fin_out_as_int₃,
     ``forall_fin_out_as_int₄, ``forall_fin_out_as_int₅]
-  let mut result ← whnf ty
-  let mut domains := #[]
-  while let .forallE _ domain body _ := result do
-    if body.hasLooseBVars then return .continue
-    domains := domains.push domain
-    result ← whnf body
+  let some (domains, result) ← Smt.Preprocess.functionSignature ty | return .continue
+  if domains.size > arities.size then
+    if result.isAppOfArity ``Fin 1 || (← (domains.extract arities.size domains.size).anyM
+        fun d => return (← whnf d).isAppOfArity ``Fin 1) then
+      throwError "[embedding] Fin in this function signature requires support beyond five arguments"
+    return .continue
   unless result.isAppOfArity ``Fin 1 && !domains.isEmpty do return .continue
-  let some thm := arities[domains.size - 1]? | return .continue
+  let thm := arities[domains.size - 1]!
   -- Inspect the arrow spine without introducing hypothetical instances from its arguments.
   for domain in domains do
     unless (← whnf domain).isAppOfArity ``Fin 1 do
