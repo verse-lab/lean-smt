@@ -72,20 +72,15 @@ where
     let y : Q($α) ← reconstructTerm t[1]!
     return q($x = $y)
   | .DISTINCT =>
-    let (sortLevel, α) ← reconstructSortLevelAndSort t[0]!.getSort!
-    try
-      -- `distinctN` is intentionally restricted to `Type`. Use it whenever
-      -- the reconstructed element sort is known to be one universe higher.
-      let u ← Meta.decLevel sortLevel
-      let α : Q(Type $u) ← pure α
-      let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
-      buildDistinctN α xs.toList
-    catch _ =>
-      -- Preserve the previous reconstruction for genuinely sort-polymorphic
-      -- terms, whose universe level cannot be decremented safely.
-      let α : Q(Sort $sortLevel) ← pure α
-      let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
-      return buildDistinctSort sortLevel α xs.toList
+    let (sortLevel, (α : Q(Sort sortLevel))) ← reconstructSortLevelAndSort t[0]!.getSort!
+    let xs : Array Q($α) ← t.getChildren.mapM reconstructTerm
+    -- Match the source inequality and its Decidable instance for binary distinct.
+    -- Larger lists use the compact encoding when their element sort is a Type.
+    if xs.size > 2 then
+      if let some u ← (observing? (Meta.decLevel sortLevel) : MetaM (Option Level)) then
+        let α : Q(Type $u) := α
+        return ← buildDistinctN α xs.toList
+    return buildDistinctSort sortLevel α xs.toList
   | .ITE =>
     let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort t.getSort!
     let c : Q(Prop) ← reconstructTerm t[0]!
