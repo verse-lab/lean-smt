@@ -11,6 +11,8 @@ public import Smt.Reconstruct
 public meta import Smt.Reconstruct
 public import Smt.Reconstruct.Quant.Lemmas
 public meta import Smt.Reconstruct.Quant.Lemmas
+public import Smt.Preprocess.Normalize.Prop
+public meta import Smt.Preprocess.Normalize.Prop
 
 public meta section
 
@@ -32,6 +34,16 @@ where
 namespace Smt.Reconstruct.Quant
 
 open Lean Qq
+
+private def alignIteInstances (actual expected proof : Expr) : MetaM Expr := do
+  let thms ← ({} : Meta.SimpTheorems).addConst ``classical_ite_cond_congr (inv := true)
+  let ctx ← Meta.Simp.mkContext { singlePass := true } #[thms]
+  let (actual', _) ← Meta.simp actual ctx
+  let (expected', _) ← Meta.simp expected ctx
+  unless ← Meta.isDefEq actual'.expr expected'.expr do
+    throwError "quantifier instantiation produced a proof of{indentExpr actual}\nexpected{indentExpr expected}"
+  let proof ← Meta.mkEqMP (← actual'.getProof) proof
+  Meta.mkEqMPR (← expected'.getProof) proof
 
 def getVariableName (t : cvc5.Term) : Name :=
   if t.hasSymbol! then
@@ -265,7 +277,16 @@ def reconstructRewrite (pf : cvc5.Proof) : ReconstructM (Option Expr) := do
     let mut es := #[]
     for t in pf.getArguments[0]! do
       es := es.push (← reconstructTerm t)
-    addThm (← reconstructTerm pf.getResult) (mkAppN xsF es)
+    let type ← reconstructTerm pf.getResult
+    let proof := mkAppN xsF es
+    let actual ← Meta.inferType proof
+    if ← Meta.isDefEq actual type then
+      addThm type proof
+    else
+      -- Instantiation can change which Decidable instance typeclass search selects.
+      -- Compare the two types after rewriting ite to use the same instance.
+      let proof ← alignIteInstances actual type proof
+      addThm type proof
   | .ALPHA_EQUIV =>
     let (u, (α : Q(Sort u))) ← reconstructSortLevelAndSort pf.getResult[0]!.getSort!
     let t  : Q($α) ← reconstructTerm pf.getResult[0]!
