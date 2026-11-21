@@ -1,0 +1,4 @@
+Test/Fin/TrustedBlockers.lean:19:2: error: The tactic provided to `fail_if_success` succeeded but was expected to fail:
+  have : ¬∃ i : Fin 2, (i.val : Int) ≠ x := by smt +trust
+Test/Fin/TrustedBlockers.lean:23:2: error: The tactic provided to `fail_if_success` succeeded but was expected to fail:
+  have (rel : LT Int) (i : Fin 1) : @LT.lt Int rel (i.val : Int) 1 := by smt +trust

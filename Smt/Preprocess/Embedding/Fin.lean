@@ -79,64 +79,50 @@ theorem exists_fin_as_int {n : Nat} {p : Fin n → Prop} :
   · intro ⟨x, hx, hp⟩
     exact ⟨ofIntFin n x hx, hp hx⟩
 
+/-- Lift a predicate across an encoding whose valid representations round-trip. -/
+private theorem forall_valid_encoding {F G : Sort _} {p : F → Prop} {valid : G → Prop}
+    {decode : (g : G) → valid g → F} (encode : F → G)
+    (validEncode : ∀ f, valid (encode f)) (roundTrip : ∀ f, decode (encode f) (validEncode f) = f) :
+    (∀ f, p f) ↔ ∀ g h, p (decode g h) :=
+  ⟨fun h g hg => h (decode g hg), fun h f => roundTrip f ▸ h (encode f) (validEncode f)⟩
+
 theorem forall_fin_out_as_int₁ {n : Nat} {p : (α₁ → Fin n) → Prop} :
     (∀ f : α₁ → Fin n, p f) ↔
     (∀ f : α₁ → Int, (hf : ∀ a₁, 0 ≤ f a₁ ∧ f a₁ < n) →
-      p (fun a₁ => ofIntFin n (f a₁) (hf a₁))) := by
-  constructor
-  · intro h f hf
-    exact h (fun a₁ => ofIntFin n (f a₁) (hf a₁))
-  · intro h f
-    have hf := h (fun a₁ => ((f a₁ : Nat) : Int)) (fun a₁ => fin_bounds (f a₁))
-    simpa [ofIntFin_of_fin] using hf
+      p (fun a₁ => ofIntFin n (f a₁) (hf a₁))) :=
+  forall_valid_encoding (fun f a₁ => ((f a₁ : Nat) : Int))
+    (fun f a₁ => fin_bounds (f a₁)) (fun _ => by simp only [ofIntFin_of_fin])
 
 theorem forall_fin_out_as_int₂ {n : Nat} {p : (α₁ → α₂ → Fin n) → Prop} :
     (∀ f : α₁ → α₂ → Fin n, p f) ↔
     (∀ f : α₁ → α₂ → Int, (hf : ∀ a₁ a₂, 0 ≤ f a₁ a₂ ∧ f a₁ a₂ < n) →
-      p (fun a₁ a₂ => ofIntFin n (f a₁ a₂) (hf a₁ a₂))) := by
-  constructor
-  · intro h f hf
-    exact h (fun a₁ a₂ => ofIntFin n (f a₁ a₂) (hf a₁ a₂))
-  · intro h f
-    have hf := h (fun a₁ a₂ => ((f a₁ a₂ : Nat) : Int)) (fun a₁ a₂ => fin_bounds (f a₁ a₂))
-    simpa [ofIntFin_of_fin] using hf
+      p (fun a₁ a₂ => ofIntFin n (f a₁ a₂) (hf a₁ a₂))) :=
+  forall_valid_encoding (fun f a₁ a₂ => ((f a₁ a₂ : Nat) : Int))
+    (fun f a₁ a₂ => fin_bounds (f a₁ a₂)) (fun _ => by simp only [ofIntFin_of_fin])
 
 theorem forall_fin_out_as_int₃ {n : Nat} {p : (α₁ → α₂ → α₃ → Fin n) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → Fin n, p f) ↔
     (∀ f : α₁ → α₂ → α₃ → Int,
       (hf : ∀ a₁ a₂ a₃, 0 ≤ f a₁ a₂ a₃ ∧ f a₁ a₂ a₃ < n) →
-      p (fun a₁ a₂ a₃ => ofIntFin n (f a₁ a₂ a₃) (hf a₁ a₂ a₃))) := by
-  constructor
-  · intro h f hf
-    exact h (fun a₁ a₂ a₃ => ofIntFin n (f a₁ a₂ a₃) (hf a₁ a₂ a₃))
-  · intro h f
-    have hf := h (fun a₁ a₂ a₃ => ((f a₁ a₂ a₃ : Nat) : Int)) (fun a₁ a₂ a₃ => fin_bounds (f a₁ a₂ a₃))
-    simpa [ofIntFin_of_fin] using hf
+      p (fun a₁ a₂ a₃ => ofIntFin n (f a₁ a₂ a₃) (hf a₁ a₂ a₃))) :=
+  forall_valid_encoding (fun f a₁ a₂ a₃ => ((f a₁ a₂ a₃ : Nat) : Int))
+    (fun f a₁ a₂ a₃ => fin_bounds (f a₁ a₂ a₃)) (fun _ => by simp only [ofIntFin_of_fin])
 
 theorem forall_fin_out_as_int₄ {n : Nat} {p : (α₁ → α₂ → α₃ → α₄ → Fin n) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → α₄ → Fin n, p f) ↔
     (∀ f : α₁ → α₂ → α₃ → α₄ → Int,
       (hf : ∀ a₁ a₂ a₃ a₄, 0 ≤ f a₁ a₂ a₃ a₄ ∧ f a₁ a₂ a₃ a₄ < n) →
-      p (fun a₁ a₂ a₃ a₄ => ofIntFin n (f a₁ a₂ a₃ a₄) (hf a₁ a₂ a₃ a₄))) := by
-  constructor
-  · intro h f hf
-    exact h (fun a₁ a₂ a₃ a₄ => ofIntFin n (f a₁ a₂ a₃ a₄) (hf a₁ a₂ a₃ a₄))
-  · intro h f
-    have hf := h (fun a₁ a₂ a₃ a₄ => ((f a₁ a₂ a₃ a₄ : Nat) : Int)) (fun a₁ a₂ a₃ a₄ => fin_bounds (f a₁ a₂ a₃ a₄))
-    simpa [ofIntFin_of_fin] using hf
+      p (fun a₁ a₂ a₃ a₄ => ofIntFin n (f a₁ a₂ a₃ a₄) (hf a₁ a₂ a₃ a₄))) :=
+  forall_valid_encoding (fun f a₁ a₂ a₃ a₄ => ((f a₁ a₂ a₃ a₄ : Nat) : Int))
+    (fun f a₁ a₂ a₃ a₄ => fin_bounds (f a₁ a₂ a₃ a₄)) (fun _ => by simp only [ofIntFin_of_fin])
 
 theorem forall_fin_out_as_int₅ {n : Nat} {p : (α₁ → α₂ → α₃ → α₄ → α₅ → Fin n) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → α₄ → α₅ → Fin n, p f) ↔
     (∀ f : α₁ → α₂ → α₃ → α₄ → α₅ → Int,
       (hf : ∀ a₁ a₂ a₃ a₄ a₅, 0 ≤ f a₁ a₂ a₃ a₄ a₅ ∧ f a₁ a₂ a₃ a₄ a₅ < n) →
-      p (fun a₁ a₂ a₃ a₄ a₅ => ofIntFin n (f a₁ a₂ a₃ a₄ a₅) (hf a₁ a₂ a₃ a₄ a₅))) := by
-  constructor
-  · intro h f hf
-    exact h (fun a₁ a₂ a₃ a₄ a₅ => ofIntFin n (f a₁ a₂ a₃ a₄ a₅) (hf a₁ a₂ a₃ a₄ a₅))
-  · intro h f
-    have hf := h (fun a₁ a₂ a₃ a₄ a₅ => ((f a₁ a₂ a₃ a₄ a₅ : Nat) : Int))
-      (fun a₁ a₂ a₃ a₄ a₅ => fin_bounds (f a₁ a₂ a₃ a₄ a₅))
-    simpa [ofIntFin_of_fin] using hf
+      p (fun a₁ a₂ a₃ a₄ a₅ => ofIntFin n (f a₁ a₂ a₃ a₄ a₅) (hf a₁ a₂ a₃ a₄ a₅))) :=
+  forall_valid_encoding (fun f a₁ a₂ a₃ a₄ a₅ => ((f a₁ a₂ a₃ a₄ a₅ : Nat) : Int))
+    (fun f a₁ a₂ a₃ a₄ a₅ => fin_bounds (f a₁ a₂ a₃ a₄ a₅)) (fun _ => by simp only [ofIntFin_of_fin])
 
 /-- To extend a function outside the interval, use an element of its domain or codomain.
 This condition matters when `n = 0` and the codomain is empty. -/
@@ -158,65 +144,45 @@ theorem extFin_cast {n : Nat} {β : Sort u} [FinExtension n β] (f : Fin n → �
   · rename_i hn
     exact absurd hb hn
 
+private theorem forall_retraction {F G : Sort _} {p : F → Prop} {restrict : G → F}
+    (extend : F → G) (roundTrip : ∀ f, restrict (extend f) = f) :
+    (∀ f, p f) ↔ ∀ g, p (restrict g) :=
+  ⟨fun h g => h (restrict g), fun h f => roundTrip f ▸ h (extend f)⟩
+
 @[fin_embedding ↓]
 theorem forall_fin_in_as_int₁ {n : Nat} [FinExtension n α₁] {p : (Fin n → α₁) → Prop} :
     (∀ f : Fin n → α₁, p f) ↔
-    (∀ f : Int → α₁, p (fun a => f ((a : Nat) : Int))) := by
-  constructor
-  · intro h f
-    exact h (fun a => f ((a : Nat) : Int))
-  · intro h f
-    have hf := h (extFin f)
-    simpa [extFin_cast] using hf
+    (∀ f : Int → α₁, p (fun a => f ((a : Nat) : Int))) :=
+  forall_retraction extFin (fun _ => by simp only [extFin_cast])
 
 @[fin_embedding ↓]
 theorem forall_fin_in_as_int₂ {n : Nat} [FinExtension n α₂]
     {p : (α₁ → Fin n → α₂) → Prop} :
     (∀ f : α₁ → Fin n → α₂, p f) ↔
-    (∀ f : α₁ → Int → α₂, p (fun a₁ a => f a₁ ((a : Nat) : Int))) := by
-  constructor
-  · intro h f
-    exact h (fun a₁ a => f a₁ ((a : Nat) : Int))
-  · intro h f
-    have hf := h (fun a₁ => extFin (f a₁))
-    simpa [extFin_cast] using hf
+    (∀ f : α₁ → Int → α₂, p (fun a₁ a => f a₁ ((a : Nat) : Int))) :=
+  forall_retraction (fun f a₁ => extFin (f a₁)) (fun _ => by simp only [extFin_cast])
 
 @[fin_embedding ↓]
 theorem forall_fin_in_as_int₃ {n : Nat} [FinExtension n α₃]
     {p : (α₁ → α₂ → Fin n → α₃) → Prop} :
     (∀ f : α₁ → α₂ → Fin n → α₃, p f) ↔
-    (∀ f : α₁ → α₂ → Int → α₃, p (fun a₁ a₂ a => f a₁ a₂ ((a : Nat) : Int))) := by
-  constructor
-  · intro h f
-    exact h (fun a₁ a₂ a => f a₁ a₂ ((a : Nat) : Int))
-  · intro h f
-    have hf := h (fun a₁ a₂ => extFin (f a₁ a₂))
-    simpa [extFin_cast] using hf
+    (∀ f : α₁ → α₂ → Int → α₃, p (fun a₁ a₂ a => f a₁ a₂ ((a : Nat) : Int))) :=
+  forall_retraction (fun f a₁ a₂ => extFin (f a₁ a₂)) (fun _ => by simp only [extFin_cast])
 
 @[fin_embedding ↓]
 theorem forall_fin_in_as_int₄ {n : Nat} [FinExtension n α₄]
     {p : (α₁ → α₂ → α₃ → Fin n → α₄) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → Fin n → α₄, p f) ↔
-    (∀ f : α₁ → α₂ → α₃ → Int → α₄, p (fun a₁ a₂ a₃ a => f a₁ a₂ a₃ ((a : Nat) : Int))) := by
-  constructor
-  · intro h f
-    exact h (fun a₁ a₂ a₃ a => f a₁ a₂ a₃ ((a : Nat) : Int))
-  · intro h f
-    have hf := h (fun a₁ a₂ a₃ => extFin (f a₁ a₂ a₃))
-    simpa [extFin_cast] using hf
+    (∀ f : α₁ → α₂ → α₃ → Int → α₄, p (fun a₁ a₂ a₃ a => f a₁ a₂ a₃ ((a : Nat) : Int))) :=
+  forall_retraction (fun f a₁ a₂ a₃ => extFin (f a₁ a₂ a₃)) (fun _ => by simp only [extFin_cast])
 
 @[fin_embedding ↓]
 theorem forall_fin_in_as_int₅ {n : Nat} [FinExtension n α₅]
     {p : (α₁ → α₂ → α₃ → α₄ → Fin n → α₅) → Prop} :
     (∀ f : α₁ → α₂ → α₃ → α₄ → Fin n → α₅, p f) ↔
     (∀ f : α₁ → α₂ → α₃ → α₄ → Int → α₅,
-      p (fun a₁ a₂ a₃ a₄ a => f a₁ a₂ a₃ a₄ ((a : Nat) : Int))) := by
-  constructor
-  · intro h f
-    exact h (fun a₁ a₂ a₃ a₄ a => f a₁ a₂ a₃ a₄ ((a : Nat) : Int))
-  · intro h f
-    have hf := h (fun a₁ a₂ a₃ a₄ => extFin (f a₁ a₂ a₃ a₄))
-    simpa [extFin_cast] using hf
+      p (fun a₁ a₂ a₃ a₄ a => f a₁ a₂ a₃ a₄ ((a : Nat) : Int))) :=
+  forall_retraction (fun f a₁ a₂ a₃ a₄ => extFin (f a₁ a₂ a₃ a₄)) (fun _ => by simp only [extFin_cast])
 
 public meta section
 
@@ -228,7 +194,7 @@ while Lean admits such a function on an empty domain. Check the actual signature
 applying an output rule, including rules exposed by earlier simplification. -/
 simproc ↓ [fin_embedding] embed_fin_output (∀ _ : _ → _, _) := fun e => do
   let .forallE _ ty _ _ := e | return .continue
-  let arities := #[``forall_fin_out_as_int₁, ``forall_fin_out_as_int₂, ``forall_fin_out_as_int₃,
+  let arities : Vector Name Smt.Preprocess.finArityLimit := #v[``forall_fin_out_as_int₁, ``forall_fin_out_as_int₂, ``forall_fin_out_as_int₃,
     ``forall_fin_out_as_int₄, ``forall_fin_out_as_int₅]
   let some (domains, result) ← Smt.Preprocess.functionSignature ty | return .continue
   if domains.size > arities.size then

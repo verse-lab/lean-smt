@@ -90,17 +90,17 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let mv₀ := (← Meta.mkFreshExprMVar (← mv.getType)).mvarId!
   -- 1. Cleanup goal.
   let keep ← hs.foldlM (fun s h => return (← (Expr.collectFVars h).run s).snd) {}
-  let (sourceFin, witnesses) ← if cfg.embeddings || cfg.normalize || cfg.trust then
+  let fin ← if cfg.embeddings || cfg.normalize || cfg.trust then
     Preprocess.finContext ((← hs.mapM Meta.inferType) ++ hs.push goalType)
-    else pure (false, #[])
-  let mv₀ ← mv₀.cleanup (keep.fvarIds ++ witnesses)
+    else pure {}
+  let mv₀ ← mv₀.cleanup (keep.fvarIds ++ fin.keep)
   trace[smt.preprocess] "after cleanup: {mv₀}"
   mv₀.withContext do
   -- 2. Preprocess the hints and goal.
   let steps := if cfg.mono then #[Preprocess.mono] else #[Preprocess.pushHintsToCtx] ++
               (if cfg.intros then #[Preprocess.intros] else #[]) ++ #[Preprocess.negateGoal]
-  let steps := if cfg.normalize then steps.push (Preprocess.normalizeWithFin sourceFin) else steps
-  let steps := if cfg.embeddings then steps.push (Preprocess.embeddingWithFin sourceFin) else steps
+  let steps := if cfg.normalize then steps.push (Preprocess.normalizeWithFin fin.usesFin) else steps
+  let steps := if cfg.embeddings then steps.push (Preprocess.embeddingWithFin fin.usesFin) else steps
   let ⟨map, hs₁, mv₁⟩ ← Preprocess.applySteps mv₀ hs steps
   mv₁.withContext do
   -- 3. Generate the SMT query.
@@ -120,7 +120,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   let userSorts := cmds.any fun
     | .declareSort .. | .defineSort .. | .declareDatatypes .. => true
     | _ => false
-  let trust := cfg.trust && !(sourceFin && userSorts)
+  let trust := cfg.trust && !(fin.usesFin && userSorts)
   if cfg.trust && !trust then
     trace[smt] "reconstructing this Fin query because a user-defined SMT sort may be empty in Lean"
   let options := defaultSolverOptions ++ (if trust then [] else [("produce-proofs", "true")]) ++ cfg.extraSolverOptions

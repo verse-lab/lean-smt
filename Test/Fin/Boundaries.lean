@@ -55,4 +55,8 @@ example (x : Nat) (h : x = 2) : x + 1 = 3 := by
   let _i : Fin 3 := 1
   smt [h]
 
+-- A local value also witnesses an opaque named domain.
+private opaque Carrier : Type := Unit
+example (w : Carrier) (f : Carrier → Fin 0) : False := by smt
+
 end FinBoundaries

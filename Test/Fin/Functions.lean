@@ -22,3 +22,12 @@ example (n : Nat) (r : Nat → Bool → Nat → Bool → Fin n → Bool)
 
 -- A field over an empty index set satisfies the pointwise bound vacuously.
 example (read : Fin 0 → Nat) : ∀ i, read i < 3 := by smt
+
+-- Fin input support depends on the position of the index, even for a longer field.
+example (n : Nat) (f : Fin n → Int → Int → Int → Int → Int → Int)
+    (h : ∀ i, f i 0 0 0 0 0 ≤ 1) (i : Fin n) : f i 0 0 0 0 0 ≤ 1 := by smt [h]
+
+/-- error: [embedding] Fin in this function signature requires support beyond five arguments -/
+#guard_msgs in
+example (n : Nat) (f : Int → Int → Int → Int → Int → Fin n → Int)
+    (h : ∀ i, f 0 0 0 0 0 i ≤ 1) (i : Fin n) : f 0 0 0 0 0 i ≤ 1 := by smt [h]
