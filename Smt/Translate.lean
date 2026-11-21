@@ -14,6 +14,8 @@ public import Smt.Attribute
 public meta import Smt.Attribute
 public import Smt.Translate.Term
 public meta import Smt.Translate.Term
+public import Smt.Util
+public meta import Smt.Util
 
 public meta section
 
@@ -48,9 +50,6 @@ structure TranslationM.State where
   localFVars : FVarIdSet := {}
   /-- Memoizes `applyTranslators?` calls together with what they add to `depConstants` and `depFVars`. -/
   cache : Std.HashMap Expr (Option (Term × NameSet × FVarIdSet)) := {}
-  /-- A mapping from a scopped name to a suffix index that makes it unique. This field does not handle
-  scopping, which should be handled by `withScopedName` -/
-  scopedNames : Std.HashMap Name Nat := {}
   /-- A mapping from fvars to unique names. -/
   uniqueFVarNames : Std.HashMap FVarId String := {}
 
@@ -106,18 +105,16 @@ def withCache (k : Translator) (e : Expr) : TranslationM (Option Term) := do
     }
     return ret?
 
+/-- The SMT-LIB symbol that the free variable `fv` is translated to. -/
+def fvarSymbol (fv : FVarId) : TranslationM String := do
+  match (← get).uniqueFVarNames[fv]? with
+  | some n => return n
+  | none   => return (← fv.getUserName).toString
+
+/-- Run `k` with a name for a variable bound over `b`, based on `n` but renamed if needed so that
+it does not capture any symbol that may occur in the translation of `b`. -/
 def withScopedName (n : Name) (b : Expr) (k : Name → TranslationM α) : TranslationM α := do
-  let state ← get
-  let mut n' := n
-  let mut scopedNames := state.scopedNames
-  while ← b.hasAnyFVar' (·.getUserName >>= (return · == n')) do
-    let i := scopedNames.getD n 1
-    n' := n.appendIndexAfter i
-    scopedNames := scopedNames.insert n (i + 1)
-  set { state with scopedNames := scopedNames }
-  let k := k n'
-  set state
-  k
+  k (← Util.freshVarName n fun n' => b.hasAnyFVar' fun fv => return (← fvarSymbol fv) == n'.toString)
 
 mutual
 
@@ -145,13 +142,9 @@ partial def applyTranslators? : Translator := withCache fun e => do
       -- Then try splitting subexpressions
       match e with
       | fvar fv =>
-        if (← get).localFVars.contains fv then
-          return symbolT (← fv.getUserName).toString
-        else
+        unless (← get).localFVars.contains fv do
           modify fun st => { st with depFVars := st.depFVars.insert fv }
-          match (← get).uniqueFVarNames[fv]? with
-          | some n => return symbolT n
-          | none   => return symbolT (← fv.getUserName).toString
+        return symbolT (← fvarSymbol fv)
       | const nm _ =>
         modify fun st => { st with depConstants := st.depConstants.insert nm }
         return symbolT nm.toString

@@ -75,10 +75,21 @@ def genUniqueFVarNames : MetaM (Std.HashMap FVarId String × Std.HashMap String 
   let lCtx ← getLCtx
   let st : NameSanitizerState := { options := {}}
   let (lCtx, _) := (lCtx.sanitizeNames st).run
-  return lCtx.getFVarIds.foldl (init := ({}, {})) fun (m₁, m₂) fvarId =>
-    let m₁ := m₁.insert fvarId (lCtx.getRoundtrippingUserName? fvarId).get!.toString
-    let m₂ := m₂.insert (lCtx.getRoundtrippingUserName? fvarId).get!.toString (.fvar fvarId)
-    (m₁, m₂)
+  let names := lCtx.getFVarIds.map fun fvarId => (fvarId, (lCtx.getRoundtrippingUserName? fvarId).get!)
+  let mut used : NameSet := names.foldl (·.insert ·.2) {}
+  let mut m₁ := {}
+  let mut m₂ := {}
+  for (fvarId, n) in names do
+    -- Rename free variables that clash with SMT-LIB builtins or global constants.
+    let n' ← Util.freshVarName n fun c => return c != n && used.contains c
+    used := used.insert n'
+    m₁ := m₁.insert fvarId n'.toString
+    m₂ := m₂.insert n'.toString (.fvar fvarId)
+    -- If `n` was renamed away from a constant, make sure the symbol `n` is reconstructed to the
+    -- constant and not to this free variable.
+    if let some c := (← getEnv).find? n then
+      m₂ := m₂.insert n.toString (.const c.name (c.numLevelParams.repeat (.zero :: ·) []))
+  return (m₁, m₂)
 
 def prepareSmtQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) := do
   Query.generateQuery hs fvNames

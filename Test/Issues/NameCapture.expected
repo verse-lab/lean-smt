@@ -1,0 +1,33 @@
+Test/Issues/NameCapture.lean:9:8: warning: declaration uses `sorry`
+Test/Issues/NameCapture.lean:15:8: warning: declaration uses `sorry`
+Test/Issues/NameCapture.lean:20:8: warning: declaration uses `sorry`
+goal: ∃ q, ¬_root_.q ∨ q
+
+query:
+(set-logic ALL)
+(declare-const q Bool)
+(assert (not (exists ((q_1 Bool)) (or (not q) q_1))))
+(check-sat)
+Test/Issues/NameCapture.lean:24:0: warning: declaration uses `sorry`
+goal: p ∨ _root_.p
+
+query:
+(set-logic ALL)
+(declare-const p_1 Bool)
+(assert p_1)
+(declare-const p Bool)
+(assert (not (or p_1 p)))
+(check-sat)
+Test/Issues/NameCapture.lean:28:0: warning: declaration uses `sorry`
+goal: exp < «let»
+
+query:
+(set-logic ALL)
+(declare-const mod_1 Int)
+(declare-const let_1 Int)
+(assert (< mod_1 let_1))
+(declare-const exp_1 Int)
+(assert (< exp_1 mod_1))
+(assert (not (< exp_1 let_1)))
+(check-sat)
+Test/Issues/NameCapture.lean:43:0: warning: declaration uses `sorry`

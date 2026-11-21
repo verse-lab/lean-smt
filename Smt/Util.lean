@@ -97,6 +97,64 @@ def smtConsts : Std.HashSet String :=
     "str.from_code"
   ]
 
+/-- Symbols that cannot be used as variable names: the reserved words of SMT-LIB and the
+(non-indexed) builtin function symbols and constants of cvc5 1.4.2. Taken from cvc5's
+`src/parser/smt2/smt2_lexer.cpp` and `src/parser/smt2/smt2_state.cpp`. Unlike `smtConsts`, this is
+not the set of Lean constants that are translated to builtins. -/
+def smtReservedSymbols : Std.HashSet String :=
+  Std.HashSet.ofList
+  [
+    "!", "*", "+", "-", "/", "/_total", "<", "<=", "=", "=>", ">", ">=", "@", "RNA", "RNE", "RTN",
+    "RTP", "RTZ", "^", "_", "abs", "and", "arccos", "arccot", "arccsc", "arcsec", "arcsin",
+    "arctan", "as", "bag", "bag.all", "bag.card", "bag.choose", "bag.count",
+    "bag.difference_remove", "bag.difference_subtract", "bag.empty", "bag.filter", "bag.fold",
+    "bag.inter_min", "bag.map", "bag.member", "bag.partition", "bag.setof", "bag.some",
+    "bag.subbag", "bag.union_disjoint", "bag.union_max", "bv2nat", "bvadd", "bvand", "bvashr",
+    "bvcomp", "bvite", "bvlshr", "bvmul", "bvnand", "bvneg", "bvnego", "bvnor", "bvnot", "bvor",
+    "bvredand", "bvredor", "bvsaddo", "bvsdiv", "bvsdivo", "bvsge", "bvsgt", "bvshl", "bvsle",
+    "bvslt", "bvsmod", "bvsmulo", "bvsrem", "bvssubo", "bvsub", "bvuaddo", "bvudiv", "bvuge",
+    "bvugt", "bvule", "bvult", "bvumulo", "bvurem", "bvusubo", "bvxnor", "bvxor", "concat", "cos",
+    "cot", "csc", "distinct", "div", "div_total", "eqrange", "exists", "exp", "false", "ff.add",
+    "ff.bitsum", "ff.mul", "ff.neg", "forall", "fp", "fp.abs", "fp.add", "fp.div", "fp.eq",
+    "fp.fma", "fp.geq", "fp.gt", "fp.isInfinite", "fp.isNaN", "fp.isNegative", "fp.isNormal",
+    "fp.isPositive", "fp.isSubnormal", "fp.isZero", "fp.leq", "fp.lt", "fp.max", "fp.min", "fp.mul",
+    "fp.neg", "fp.rem", "fp.roundToIntegral", "fp.sqrt", "fp.sub", "fp.to_real", "int.log2",
+    "int.pow2", "is_int", "ite", "lambda", "let", "match", "mod", "mod_total", "not",
+    "nullable.is_null", "nullable.is_some", "nullable.lift", "nullable.null", "nullable.some",
+    "nullable.val", "or", "par", "piand", "pto", "re.*", "re.+", "re.++", "re.all", "re.allchar",
+    "re.comp", "re.diff", "re.inter", "re.none", "re.opt", "re.range", "re.union", "real.pi",
+    "rel.aggr", "rel.group", "rel.iden", "rel.join", "rel.join_image", "rel.product", "rel.project",
+    "rel.table_join", "rel.tclosure", "rel.transpose", "roundNearestTiesToAway",
+    "roundNearestTiesToEven", "roundTowardNegative", "roundTowardPositive", "roundTowardZero",
+    "sbv_to_int", "sec", "select", "sep", "sep.emp", "sep.nil", "seq.++", "seq.at", "seq.contains",
+    "seq.empty", "seq.extract", "seq.indexof", "seq.len", "seq.nth", "seq.prefixof", "seq.replace",
+    "seq.replace_all", "seq.rev", "seq.suffixof", "seq.unit", "seq.update", "set.all", "set.card",
+    "set.choose", "set.complement", "set.comprehension", "set.empty", "set.filter", "set.fold",
+    "set.insert", "set.inter", "set.is_empty", "set.is_singleton", "set.map", "set.member",
+    "set.minus", "set.singleton", "set.some", "set.subset", "set.union", "set.universe", "sin",
+    "sqrt", "store", "str.++", "str.<", "str.<=", "str.at", "str.contains", "str.from_code",
+    "str.from_int", "str.in_re", "str.indexof", "str.indexof_re", "str.is_digit", "str.len",
+    "str.prefixof", "str.replace", "str.replace_all", "str.replace_re", "str.replace_re_all",
+    "str.rev", "str.substr", "str.suffixof", "str.to_code", "str.to_int", "str.to_lower",
+    "str.to_re", "str.to_upper", "str.update", "table.aggr", "table.group", "table.join",
+    "table.product", "table.project", "tan", "to_int", "to_real", "true", "tuple", "tuple.project",
+    "tuple.unit", "ubv_to_int", "wand", "xor"
+  ]
+
+/-- Return the first of `n`, `n_1`, `n_2`, … that is not `taken` and does not clash with an SMT-LIB
+builtin or a global constant (constants are translated to their names), so it can be used as the
+name of a variable without capturing anything. -/
+def freshVarName [Monad m] [MonadEnv m] (n : Name) (taken : Name → m Bool) : m Name := do
+  let isReserved (s : String) :=
+    -- SMT-LIB reserves symbols starting with `@` or `.` for solver-generated symbols.
+    smtReservedSymbols.contains s || s.startsWith "@" || s.startsWith "."
+  let mut n' := n
+  let mut i := 1
+  while isReserved n'.toString || (← getEnv).contains n' || (← taken n') do
+    n' := n.appendIndexAfter i
+    i := i + 1
+  return n'
+
 /-- Like `unfoldProjInst?`, but iterated in case a typeclass projection
 is defined in terms of another. -/
 partial def unfoldProjInsts? (e : Expr) : MetaM (Option Expr) := do
