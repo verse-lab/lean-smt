@@ -84,9 +84,6 @@ def genUniqueFVarNames : MetaM (Std.HashMap FVarId String × Std.HashMap String 
     m₂ := m₂.insert n.toString d.toExpr
   return (m₁, m₂)
 
-def prepareSmtQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) := do
-  Query.generateQuery hs fvNames
-
 def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.withContext do
   -- 0. Create a duplicate goal to preserve the original goal.
   let goalType : Q(Prop) ← mv.getType
@@ -104,7 +101,7 @@ def smt (cfg : Config) (mv : MVarId) (hs : Array Expr) : MetaM Result := mv.with
   mv₁.withContext do
   -- 3. Generate the SMT query.
   let (fvNames₁, fvNames₂) ← genUniqueFVarNames
-  let (cmds, constants) ← Query.generateQueryWithSymbols hs₁.toList fvNames₁
+  let (cmds, constants) ← Query.generateQuery hs₁.toList fvNames₁
   let symbols := fvNames₂.insertMany constants
   let cmds := .setLogic "ALL" :: cmds
   if cfg.showQuery then

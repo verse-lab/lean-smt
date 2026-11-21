@@ -296,7 +296,9 @@ def emitVertex (cmds : Std.HashMap Expr Command) (e : Expr) : StateT (List Comma
   let some cmd := cmds[e]? | throwError "no command was computed for {e}"
   set (← addCommand cmd (← get))
 
-def generateQueryWithSymbols (hs : List Expr) (fvNames : Std.HashMap FVarId String) :
+/-- Generate the SMT-LIB commands for `hs`, together with the Lean constant behind each constant
+symbol in them. -/
+def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) :
     MetaM (List Command × Std.HashMap String Expr) :=
   withTraceNode `smt.translate.query (fun _ => pure .nil) do
     trace[smt.translate.query] "Provided Hints: {hs}"
@@ -320,8 +322,5 @@ def generateQueryWithSymbols (hs : List Expr) (fvNames : Std.HashMap FVarId Stri
     -- Lean goal at the end of the query to simplify unification during proof reconstruction.
     let (_, cmds) ← StateT.run (st.graph.orderedDfs hs (emitVertex st.commands)) []
     return (cmds.reverse, translation.constants)
-
-def generateQuery (hs : List Expr) (fvNames : Std.HashMap FVarId String) : MetaM (List Command) :=
-  Prod.fst <$> generateQueryWithSymbols hs fvNames
 
 end Smt.Translate.Query

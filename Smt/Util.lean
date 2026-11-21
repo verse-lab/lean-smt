@@ -161,7 +161,10 @@ def constSymbol (n : Name) : String :=
 /-- Choose a variable name whose spelling survives both SMT quoting and reconstruction. -/
 def freshVarName [Monad m] [MonadEnv m] (n : Name) (taken : String → m Bool) : m Name := do
   let s := n.toString
-  let base := if roundtrips n s then n else `v
+  let base := if roundtrips n s then n else
+    -- Keep a readable stem, e.g. `x` for `x✝` or for a hygienic `x._@.M._hyg.1`.
+    let stem := String.ofList (n.eraseMacroScopes.toString (escape := false) |>.toList.filter isIdRest)
+    if roundtrips (.mkSimple stem) stem then .mkSimple stem else `v
   let env ← getEnv
   let mut candidate := base
   let mut i := 1
